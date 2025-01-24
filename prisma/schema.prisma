@@ -30,6 +30,7 @@ model User {
 
   firstName String?
   lastName String?
+  phoneNumber String?
 
   dateOfBirth String?
   address String?
@@ -45,7 +46,6 @@ model User {
   ninVerified Boolean @default(false)
 
   accounts Account[]
-
 }
 
 model Account {
