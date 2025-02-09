@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, InternalServerErrorException } from "@nestjs/common";
 import { PrismaService } from "src/prisma/prisma.service";
 import { SignInDto } from "./dto/sign-in.dto";
 import { BvnDto, NinDto, PersonalInfoDto, RegisterDto, TransactionPinDto } from "./dto";
@@ -6,6 +6,7 @@ import { JwtService } from "@nestjs/jwt";
 import { ConfigService } from "@nestjs/config";
 import * as argon from 'argon2';
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
+import { AccountType } from "@prisma/client";
 
 @Injectable({})
 export class AuthService {
@@ -47,6 +48,8 @@ export class AuthService {
 
         //remove the password hash
         delete user.password;
+        delete user.bvn;
+        delete user.pin;
 
         //If execution reaches here, it means that passwords matched
         //So, send back an auth token after signing
@@ -87,23 +90,156 @@ export class AuthService {
     }
 
     //sets personal info of user like first name, last name, etc.
-    async setPersonalInfo(dto: PersonalInfoDto){
+    async setPersonalInfo(
+        userId: number,
+        dto: PersonalInfoDto){
 
+        try {
+            //update user's personal Info in database.
+            const user = await this.prisma.user.update({
+                where: {
+                    id: userId
+                },
+                data: {
+                    firstName: dto.firstName,
+                    lastName: dto.lastName,
+                    phoneNumber: dto.phoneNumber,
+                    address: dto.address,
+                    dateOfBirth: dto.dateOfBirth,
+                }
+            });
+
+            //remove user's password, bvn and pin
+            delete user.password;
+            delete user.bvn;
+            delete user.pin;
+
+            return {
+                success: true,
+                message: "Personal Info updated successfully",
+                user: {
+                    ...user
+                }
+            }
+        }catch(error){
+            throw new ForbiddenException();
+        }
+        
     }
 
     //sets user's BVN
-    async setBvn(dto: BvnDto){
-
+    async setBvn(
+        userId: number,
+        dto: BvnDto){
+            // Validate BVN length
+            if (dto.bvn.length !== 11) {
+                throw new BadRequestException("BVN must be exactly 11 characters");
+            }
+            try {
+                // Update user's BVN if valid
+                await this.prisma.user.update({
+                    where: { id: userId },
+                    data: { bvn: dto.bvn }
+                });
+        
+                return {
+                    success: true,
+                    message: "BVN successfully set",
+                };
+            } catch (error) {
+            // Handle database errors or unexpected issues
+            throw new InternalServerErrorException(
+                "An unexpected error occurred. Please try again.");
+                }
     }
 
     //sets user's NIN
-    async setNin(dto: NinDto){
-
+    async setNin(
+        userId: number,
+        dto: NinDto){
+            try {
+                //attempt to update only user's NIN
+                const user = await this.prisma.user.update({
+                    where: {
+                        id: userId,
+                    },
+                    data: {
+                        nin: dto.nin
+                    }
+                });
+                return {
+                    success: true,
+                    message: "NIN successfully set"
+                }
+            } catch(error){
+                throw new ForbiddenException();
+            }
     }
 
-    //sets user's Transaction Pin
-    async setTransactionPin(dto: TransactionPinDto){
+    //sets user's Transaction Pin and create an account if none exists
+    async setTransactionPin(
+        userId: number,
+        dto: TransactionPinDto){
+        // Find the user in the database
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId }, 
+        });
 
+        // If the user does not exist, throw an error
+        if (!user) {
+            throw new ForbiddenException('User does not exist');
+        }
+
+        // Check if the transaction PIN is already set
+        if (user.pin !== null) {
+            throw new ConflictException('Transaction PIN is already set.');
+        }
+
+        // Confirm that both pins match
+        if (dto.pin !== dto.confirmPin) {
+            throw new ForbiddenException("Pins don't match");
+        }
+
+        // Update the user with the new transaction PIN
+        await this.prisma.user.update({
+            where: { id: userId },
+            data: { pin: dto.pin.toString() }
+        });
+
+        //check if user already has a bank account
+        const account = await this.prisma.account.findFirst({
+            where: { userId: userId},
+        });
+
+        if(!account){
+            // Generate a unique account number (e.g., random 10-digit number)
+            const accountNumber = Math.floor(1000000000 + Math.random() * 9000000000).toString();
+
+            // Create the account for the user
+            await this.prisma.account.create({
+                data: {
+                    accountNumber: accountNumber,
+                    userId: user.id,
+                    accountType: AccountType.SAVINGS,
+                    balance: 0.0,
+                    canDebit: true,
+                    canCredit: true,
+                    isActive: true
+                }
+            });
+
+            return {
+                success: true,
+                message: "Transaction PIN set successfully, and account created."
+            };
+        }else {
+            return {
+                success: true,
+                message: "Transaction PIN set successfully"
+            }
+        }
+
+        
     }
 
     //This is to generate a JWT token.

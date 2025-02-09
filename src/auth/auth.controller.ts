@@ -1,7 +1,9 @@
-import { Body, Controller, Post } from "@nestjs/common";
+import { Body, Controller, Post, UseGuards } from "@nestjs/common";
 import { AuthService } from "./auth.service";
 import { BvnDto, NinDto, PersonalInfoDto, RegisterDto, TransactionPinDto } from "./dto";
 import { SignInDto } from "./dto/sign-in.dto";
+import { JwtGuard } from "./guard";
+import { GetUser } from "./decorator";
 
 @Controller('auth')
 export class AuthController {
@@ -17,23 +19,43 @@ export class AuthController {
         return this.authService.register(dto);
      }
 
+     @UseGuards(JwtGuard)
      @Post('save-personal-info')
-     async savePersonalInfo(@Body() dto: PersonalInfoDto){
-      return this.authService.setPersonalInfo(dto);
+     async savePersonalInfo(
+      @GetUser('id') userId: number,
+      @Body() dto: PersonalInfoDto){
+      return this.authService.setPersonalInfo(
+         userId,
+         dto);
      }
 
+     @UseGuards(JwtGuard)
      @Post('validate-bvn')
-     async enterBvn(@Body() dto: BvnDto){
-      return this.authService.setBvn(dto);
+     async enterBvn(
+      @GetUser('id') userId: number,
+      @Body() dto: BvnDto){
+      return this.authService.setBvn(
+         userId,
+         dto);
      }
 
+     @UseGuards(JwtGuard)
      @Post('validate-nin')
-     async enterNin(@Body() dto: NinDto){
-      return this.authService.setNin(dto);
+     async enterNin(
+      @GetUser('id') userId: number,
+      @Body() dto: NinDto){
+      return this.authService.setNin(
+         userId,
+         dto);
      }
      
-     @Post('save-transaction-pin')
-     async saveTransactionPin(@Body() dto: TransactionPinDto){
-      return this.authService.setTransactionPin(dto);
+     @UseGuards(JwtGuard)
+     @Post('set-transaction-pin')
+     async saveTransactionPin(
+      @GetUser('id') userId: number,
+      @Body() dto: TransactionPinDto){
+      return this.authService.setTransactionPin(
+         userId,
+         dto);
      }
 }

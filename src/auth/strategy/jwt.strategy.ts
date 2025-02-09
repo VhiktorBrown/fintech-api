@@ -29,8 +29,10 @@ export class JwtStrategy extends PassportStrategy(
                 }
             });
 
-            //remove the hashed password
+            //remove the hashed password, pin and bvn
             delete user.password;
+            delete user.pin;
+            delete user.bvn;
 
             //return user
             return user;
