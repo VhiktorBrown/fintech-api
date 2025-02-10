@@ -6,7 +6,8 @@ import { JwtService } from "@nestjs/jwt";
 import { ConfigService } from "@nestjs/config";
 import * as argon from 'argon2';
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
-import { AccountType } from "@prisma/client";
+import { AccountType, TransactionStatus, TransactionType } from "@prisma/client";
+import { generateTransactionReference } from "src/shared/functions";
 
 @Injectable({})
 export class AuthService {
@@ -14,9 +15,8 @@ export class AuthService {
         private prisma: PrismaService,
         private jwt: JwtService,
         private config: ConfigService,
-    ){
-
-    }
+    ){}
+    
     //validates credentials and logs in user if correct
     async login(dto: SignInDto){
         //First, attempt to find user in database.
@@ -67,6 +67,8 @@ export class AuthService {
                 data: {
                     email: dto.email,
                     password: hash,
+                    isAdmin: dto.adminSecret != null && dto.adminSecret 
+                    === this.config.get('ADMIN_SECRET') ? true : false
                 }
             });
 
@@ -216,18 +218,33 @@ export class AuthService {
             const accountNumber = Math.floor(1000000000 + Math.random() * 9000000000).toString();
 
             // Create the account for the user
-            await this.prisma.account.create({
+            const account = await this.prisma.account.create({
                 data: {
                     accountNumber: accountNumber,
                     userId: user.id,
                     accountType: AccountType.SAVINGS,
-                    balance: 0.0,
+                    balance: user.isAdmin ? 100000 : 0.0,
                     canDebit: true,
                     canCredit: true,
                     isActive: true
                 }
             });
 
+            //create a transaction if user is an admin so that we keep track
+            //of the amount funded
+            if(user.isAdmin){
+                await this.prisma.transaction.create({
+                    data: {
+                        type: TransactionType.CREDIT,
+                        amount: 500000,
+                        reference: generateTransactionReference(),
+                        status: TransactionStatus.SUCCESS,
+                        senderAccountId: account.id,
+                        recipientAccountId: account.id,
+                        description: 'Initial funding of Admin account upon creation',
+                    }
+                });
+            }
             return {
                 success: true,
                 message: "Transaction PIN set successfully, and account created."
@@ -238,8 +255,6 @@ export class AuthService {
                 message: "Transaction PIN set successfully"
             }
         }
-
-        
     }
 
     //This is to generate a JWT token.

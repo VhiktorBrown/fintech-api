@@ -22,6 +22,10 @@ enum TransactionStatus {
   FAILED
   SUCCESS
 }
+enum TransactionType {
+  CREDIT
+  DEBIT
+}
 
 model User {
   id Int @id @default(autoincrement())
@@ -44,6 +48,8 @@ model User {
   pin String?
   bvnVerified Boolean @default(false)
   ninVerified Boolean @default(false)
+
+  isAdmin Boolean @default(false)
 
   accounts Account[]
 
@@ -68,7 +74,8 @@ model Account {
   userId Int
   user User @relation(fields: [userId], references: [id])
 
-  transactions Transaction[]
+  sentTransactions Transaction[] @relation(name: "SenderAccount")
+  receivedTransactions Transaction[] @relation(name: "RecipientAccount")
 
   @@map("accounts")
 }
@@ -78,17 +85,17 @@ model Transaction {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  type String
+  type TransactionType
   amount Float
   reference String
   status TransactionStatus
   description String?
 
-  recipientAccountNumber String
-  senderAccountNumber String
+  senderAccountId Int?
+  senderAccount Account? @relation(fields: [senderAccountId], references: [id], name: "SenderAccount")
 
-  accountId Int
-  account Account @relation(fields: [accountId], references: [id])
+  recipientAccountId Int?
+  recipientAccount Account? @relation(fields: [recipientAccountId], references: [id], name: "RecipientAccount")
 
   @@map("transactions")
 
