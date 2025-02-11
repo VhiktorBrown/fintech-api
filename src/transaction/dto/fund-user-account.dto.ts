@@ -8,4 +8,8 @@ export class FundUserAccountDto {
     @IsNotEmpty()
     @IsNumber()
     transactionPin: number;
+
+    @IsNotEmpty()
+    @IsNumber()
+    amount: number;
 }

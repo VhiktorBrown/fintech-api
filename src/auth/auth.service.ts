@@ -16,14 +16,12 @@ export class AuthService {
         private jwt: JwtService,
         private config: ConfigService,
     ){}
-    
+
     //validates credentials and logs in user if correct
     async login(dto: SignInDto){
         //First, attempt to find user in database.
         const user = await this.prisma.user.findUnique({
-            where: {
-                email: dto.email
-            }
+            where: { email: dto.email }
         });
         //If user does not exist, throw appropriate error
         if(!user){
@@ -99,9 +97,7 @@ export class AuthService {
         try {
             //update user's personal Info in database.
             const user = await this.prisma.user.update({
-                where: {
-                    id: userId
-                },
+                where: { id: userId },
                 data: {
                     firstName: dto.firstName,
                     lastName: dto.lastName,
@@ -162,12 +158,8 @@ export class AuthService {
             try {
                 //attempt to update only user's NIN
                 const user = await this.prisma.user.update({
-                    where: {
-                        id: userId,
-                    },
-                    data: {
-                        nin: dto.nin
-                    }
+                    where: { id: userId },
+                    data: { nin: dto.nin }
                 });
                 return {
                     success: true,
@@ -223,7 +215,7 @@ export class AuthService {
                     accountNumber: accountNumber,
                     userId: user.id,
                     accountType: AccountType.SAVINGS,
-                    balance: user.isAdmin ? 100000 : 0.0,
+                    balance: user.isAdmin ? 500000 : 0.0,
                     canDebit: true,
                     canCredit: true,
                     isActive: true

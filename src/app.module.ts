@@ -4,6 +4,7 @@ import { UserModule } from './user/user.module';
 import { TransactionModule } from './transaction/transaction.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ConfigModule } from '@nestjs/config';
+import { AccountModule } from './account/account.module';
 
 @Module({
   imports: [
@@ -11,6 +12,7 @@ import { ConfigModule } from '@nestjs/config';
       isGlobal: true,
     }),
     AuthModule,
+    AccountModule,
     UserModule,
     TransactionModule,
     PrismaModule],
