@@ -218,7 +218,8 @@ export class AuthService {
                     balance: user.isAdmin ? 500000 : 0.0,
                     canDebit: true,
                     canCredit: true,
-                    isActive: true
+                    isActive: true,
+                    lastTransactionDate: new Date(),
                 }
             });
 
@@ -231,8 +232,10 @@ export class AuthService {
                         amount: 500000,
                         reference: generateTransactionReference(),
                         status: TransactionStatus.SUCCESS,
-                        senderAccountId: account.id,
-                        recipientAccountId: account.id,
+                        balancebefore: 0,
+                        balanceAfter: 500000,
+                        accountId: account.id,
+                        counterpartyAccountId: account.id,
                         description: 'Initial funding of Admin account upon creation',
                     }
                 });

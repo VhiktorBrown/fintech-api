@@ -16,7 +16,6 @@ export class TransactionService {
         userId: number,
         dto: FundUserAccountDto
     ) {
-        console.log(userId);
         return this.prisma.$transaction(async (tx) => {
             //first, we need to confirm that user is an admin
             const user = await tx.user.findUnique({
@@ -69,34 +68,65 @@ export class TransactionService {
                     );
             }
 
-            //If sufficient, we create the transaction and deduct money from the admin's account
-            const transaction = await tx.transaction.create({
+            const reference = generateTransactionReference();
+
+            //If sufficient, create a transaction for the sender
+            const debitTransaction = await tx.transaction.create({
                 data: {
                     type: TransactionType.DEBIT,
                     amount: dto.amount,
-                    reference: generateTransactionReference(),
+                    reference: reference,
                     status: TransactionStatus.PENDING,
                     description: 'Admin funding',
-                    senderAccountId: account.id,
-                    recipientAccountId: recipientAccount.id,
+                    accountId: account.id,
+                    balancebefore: account.balance,
+                    balanceAfter: account.balance - dto.amount,
+                    counterpartyAccountId: recipientAccount.id,
+                }
+            });
+
+            //create a transaction for the recipient
+            const creditTransaction = await tx.transaction.create({
+                data: {
+                    type: TransactionType.CREDIT,
+                    amount: dto.amount,
+                    reference: reference,
+                    status: TransactionStatus.PENDING,
+                    description: 'Admin funding',
+                    accountId: recipientAccount.id,
+                    balancebefore: recipientAccount.balance,
+                    balanceAfter: account.balance + dto.amount,
+                    counterpartyAccountId: account.id,
                 }
             });
 
             //then, deduct the money
             await tx.account.update({
                 where: {id: account.id},
-                data: { balance : { decrement: dto.amount}}
+                data: { 
+                    balance : { decrement: dto.amount},
+                    lastTransactionDate: new Date(),
+                }
             });
 
             //then, add the money to recipient's account
             await tx.account.update({
                 where: { id: recipientAccount.id },
-                data: { balance: {increment: dto.amount}}
+                data: { 
+                    balance: {increment: dto.amount},
+                    lastTransactionDate: new Date(),
+                }
             });
 
-            //update transaction by marking as successful
+            //update debit transaction by marking as successful
             await tx.transaction.update({
-                where: { id: transaction.id},
+                where: { id: debitTransaction.id},
+                data: { status: TransactionStatus.SUCCESS }
+            });
+
+            //update credit transaction by marking as successful
+            await tx.transaction.update({
+                where: { id: creditTransaction.id},
                 data: { status: TransactionStatus.SUCCESS }
             });
 
@@ -125,7 +155,8 @@ export class TransactionService {
     
                 //Fetch sender's account.
                 const account = await tx.account.findFirst({
-                    where: { userId: userId }
+                    where: { userId: userId },
+                    include: { user: true }
                 });
     
                 //fetch recipient's account
@@ -145,35 +176,68 @@ export class TransactionService {
                             'Insufficient account balance'
                         );
                 }
-    
-                //If sufficient, we create the transaction and deduct money from the admin's account
-                const transaction = await tx.transaction.create({
+
+                const reference = generateTransactionReference();
+
+                //If sufficient, create a transaction for the sender
+                const debitTransaction = await tx.transaction.create({
                     data: {
                         type: TransactionType.DEBIT,
                         amount: dto.amount,
-                        reference: generateTransactionReference(),
+                        reference: reference,
                         status: TransactionStatus.PENDING,
-                        description: `Transfer to ${recipientAccount.user.firstName} ${recipientAccount.accountNumber}`,
-                        senderAccountId: account.id,
-                        recipientAccountId: recipientAccount.id,
+                        description: dto.description 
+                        ?? `Transfer to ${recipientAccount.user.firstName} ${recipientAccount.accountNumber}`,
+                        accountId: account.id,
+                        balancebefore: account.balance,
+                        balanceAfter: account.balance - dto.amount,
+                        counterpartyAccountId: recipientAccount.id,
+                    }
+                });
+
+                //create a transaction for the recipient
+                const creditTransaction = await tx.transaction.create({
+                    data: {
+                        type: TransactionType.CREDIT,
+                        amount: dto.amount,
+                        reference: reference,
+                        status: TransactionStatus.PENDING,
+                        description: dto.description ??
+                         `Transfer from ${account.user.firstName} ${account.accountNumber}`,
+                        accountId: recipientAccount.id,
+                        balancebefore: recipientAccount.balance,
+                        balanceAfter: account.balance + dto.amount,
+                        counterpartyAccountId: account.id,
                     }
                 });
     
                 //then, deduct the money
                 await tx.account.update({
                     where: {id: account.id},
-                    data: { balance : { decrement: dto.amount}}
+                    data: { 
+                        balance : { decrement: dto.amount},
+                        lastTransactionDate: new Date(),
+                    }
                 });
     
                 //then, add the money to recipient's account
                 await tx.account.update({
                     where: { id: recipientAccount.id },
-                    data: { balance: {increment: dto.amount}}
+                    data: { 
+                        balance: {increment: dto.amount},
+                        lastTransactionDate: new Date(),
+                    }
                 });
     
-                //update transaction by marking as successful
+                //update debit transaction by marking as successful
                 await tx.transaction.update({
-                    where: { id: transaction.id},
+                    where: { id: debitTransaction.id},
+                    data: { status: TransactionStatus.SUCCESS }
+                });
+
+                //update credit transaction by marking as successful
+                await tx.transaction.update({
+                    where: { id: creditTransaction.id},
                     data: { status: TransactionStatus.SUCCESS }
                 });
     

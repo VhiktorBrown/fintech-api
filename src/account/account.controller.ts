@@ -19,4 +19,22 @@ export class AccountController {
             );
     }
 
+    @Post('get-all-accounts')
+    async getAccounts(
+        @GetUser('id') userId: number,
+    ) {
+        return this.accountService.getAccounts(
+            userId);
+    }
+
+    @Post('get-account-details')
+    async getAccountDetails(
+        @GetUser('id') userId: number,
+        @Body('accountId') accountId: number,
+    ) {
+        return this.accountService.getAccountDetails(
+            userId, accountId
+        );
+    }
+
 }

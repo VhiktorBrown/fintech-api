@@ -58,8 +58,6 @@ model User {
 
 model Account {
   id Int @id @default(autoincrement())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 
   accountNumber String @unique
   balance Float @default(0.0)
@@ -74,16 +72,17 @@ model Account {
   userId Int
   user User @relation(fields: [userId], references: [id])
 
-  sentTransactions Transaction[] @relation(name: "SenderAccount")
-  receivedTransactions Transaction[] @relation(name: "RecipientAccount")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions Transaction[] @relation(name: "PrimaryAccount")
+  counterpartyTransactions Transaction[] @relation(name: "CounterpartyAccount")
 
   @@map("accounts")
 }
 
 model Transaction {
   id Int @id @default(autoincrement())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 
   type TransactionType
   amount Float
@@ -91,11 +90,17 @@ model Transaction {
   status TransactionStatus
   description String?
 
-  senderAccountId Int?
-  senderAccount Account? @relation(fields: [senderAccountId], references: [id], name: "SenderAccount")
+  balancebefore Float
+  balanceAfter Float
 
-  recipientAccountId Int?
-  recipientAccount Account? @relation(fields: [recipientAccountId], references: [id], name: "RecipientAccount")
+  accountId Int?
+  account Account? @relation(fields: [accountId], references: [id], name: "PrimaryAccount")
+
+  counterpartyAccountId Int?
+  counterpartyAccount Account? @relation(fields: [counterpartyAccountId], references: [id], name: "CounterpartyAccount")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("transactions")
 
