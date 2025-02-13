@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { AccountService } from './account.service';
 import { JwtGuard } from 'src/auth/guard';
 import { GetUser } from 'src/auth/decorator';
@@ -19,7 +19,7 @@ export class AccountController {
             );
     }
 
-    @Post('get-all-accounts')
+    @Get('get-all-accounts')
     async getAccounts(
         @GetUser('id') userId: number,
     ) {

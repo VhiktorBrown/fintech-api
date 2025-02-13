@@ -39,9 +39,18 @@ export class AccountService {
 
     //fetches all users accounts
     async getAccounts(
-        userid: number
+        userId: number
     ) {
-        
+        //First get the account
+        const accounts = await this.prisma.account.findMany({
+            where: {userId: userId }
+        });
+
+        return {
+            success: true,
+            message: "Accounts retrieved",
+            accounts: accounts
+        }
     }
 
     //fetching user's account details - returns only authenticated user's account details
@@ -49,12 +58,9 @@ export class AccountService {
         userId: number,
         accountId: number,
     ) {
-        const user = this.prisma.user.findUnique({
-            where: { id: userId }
-        });
 
         //Next, check for account mapping user's ID
-        const account = this.prisma.account.findUnique({
+        const account = await this.prisma.account.findUnique({
             where: { id: accountId, userId: userId }
         });
 
@@ -64,10 +70,13 @@ export class AccountService {
             );
         }
 
+        console.log((await account).balance);
         return {
             success: true,
             message: "Account retrieved successfully",
-            account: account
+            account: {
+                ...account
+            }
         }
     }
 }

@@ -49,6 +49,12 @@ export class TransactionService {
                 where: { accountNumber: dto.accountNumber}
             });
 
+            if(!recipientAccount){
+                throw new ForbiddenException(
+                    "Account does not exist"
+                );
+            }
+
             //prevent user/admin from funding themselves
             if(account.accountNumber === recipientAccount.accountNumber){
                 throw new ForbiddenException(
@@ -95,7 +101,7 @@ export class TransactionService {
                     description: 'Admin funding',
                     accountId: recipientAccount.id,
                     balancebefore: recipientAccount.balance,
-                    balanceAfter: account.balance + dto.amount,
+                    balanceAfter: recipientAccount.balance + dto.amount,
                     counterpartyAccountId: account.id,
                 }
             });
@@ -206,7 +212,7 @@ export class TransactionService {
                          `Transfer from ${account.user.firstName} ${account.accountNumber}`,
                         accountId: recipientAccount.id,
                         balancebefore: recipientAccount.balance,
-                        balanceAfter: account.balance + dto.amount,
+                        balanceAfter: recipientAccount.balance + dto.amount,
                         counterpartyAccountId: account.id,
                     }
                 });
@@ -246,5 +252,107 @@ export class TransactionService {
                     message: "Transfer successful"
                 };
             })
+        }
+
+        //Fetches all user's transactions
+        async getAllTransactions(
+            userId: number ,
+            accountId: number
+        ) {
+            //check if that account belongs to user
+            const account = await this.prisma.account.findUnique({
+                where: { id: accountId, userId: userId }
+            });
+
+            if(!account){
+                return new ForbiddenException(
+                    "Account does not exist"
+                );
+            }
+
+            const transactions = await this.prisma.transaction.findMany({
+                where: { accountId: account.id },
+                select: {
+                    id: true,
+                    amount: true,
+                    reference: true,
+                    status: true,
+                    description: true,
+                    type: true,
+                    balancebefore: true,
+                    balanceAfter: true,
+                    createdAt: true,
+                    counterpartyAccount: {
+                      select: {
+                        accountNumber: true,
+                        user: {
+                          select: {
+                            firstName: true,
+                            lastName: true
+                          }
+                        }
+                      }
+                    }
+                  },
+                orderBy: {
+                    createdAt: 'desc'
+                }
+            });
+
+            return {
+                success: true,
+                message: "Transactions retrieved successfully",
+                transactions: transactions
+            }
+        }
+
+        //Fetch a single transaction
+        async getTransaction(userId: number, transactionId: number) {
+            const transaction = await this.prisma.transaction.findFirst({
+                where: {
+                    id: transactionId,
+                    OR: [
+                        {
+                            account: {
+                                userId: userId
+                            }
+                        }
+                    ]
+                },
+                select: {
+                    id: true,
+                    amount: true,
+                    reference: true,
+                    status: true,
+                    description: true,
+                    type: true,
+                    balancebefore: true,
+                    balanceAfter: true,
+                    createdAt: true,
+                    counterpartyAccount: {
+                        select: {
+                            accountNumber: true,
+                            user: {
+                                select: {
+                                    firstName: true,
+                                    lastName: true,
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            if(!transaction){
+                throw new ForbiddenException(
+                    "Transaction not found"
+                );
+            }
+
+            return {
+                success: true,
+                message: "Transaction found",
+                transaction: transaction
+            };
         }
 }

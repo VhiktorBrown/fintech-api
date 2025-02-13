@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { GetUser } from 'src/auth/decorator';
 import { JwtGuard } from 'src/auth/guard';
 import { FundUserAccountDto } from './dto/fund-user-account.dto';
@@ -27,6 +27,28 @@ export class TransactionController {
         @Body() dto: FundUserAccountDto) {
         return this.transactionService.sendMoney(
             userId, dto
+        );
+    }
+
+    //Fetch user's transactions
+    @Get('get-all-transactions')
+    async getAllTransactions(
+        @GetUser('id') userId: number,
+        @Body('accountId') accountId: number
+    ) {
+        return this.transactionService.getAllTransactions(
+            userId,
+            accountId,
+        );
+    }
+
+    @Post('get-transaction')
+    async getTransactions(
+        @GetUser('id') userId: number,
+        @Body('transactionId') transactionId: number,
+    ) {
+        return this.transactionService.getTransaction(
+            userId, transactionId
         );
     }
     
