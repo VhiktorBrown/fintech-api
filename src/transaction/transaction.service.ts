@@ -9,7 +9,6 @@ import { generateTransactionReference } from 'src/shared/functions';
 export class TransactionService {
     constructor(
         private prisma: PrismaService,
-        private config: ConfigService,
     ){}
 
     async fundUserAccountByAdmin(
@@ -181,6 +180,13 @@ export class TransactionService {
                         return new ForbiddenException(
                             'Insufficient account balance'
                         );
+                }
+
+                //prevent user from sending money to themselves
+                if(account.accountNumber == recipientAccount.accountNumber){
+                    throw new ForbiddenException(
+                        "Sorry, you cannot send money to yourself"
+                    );
                 }
 
                 const reference = generateTransactionReference();
