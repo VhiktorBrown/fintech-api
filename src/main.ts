@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { HttpExceptionFilter } from './shared/filters/http-exception.filter';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -14,6 +15,17 @@ async function bootstrap() {
   // Catches every thrown HttpException and returns a uniform error shape:
   // { success: false, statusCode, message }
   app.useGlobalFilters(new HttpExceptionFilter());
+
+  // Swagger UI available at /api
+  const config = new DocumentBuilder()
+    .setTitle('Fintech API')
+    .setDescription('REST API for peer-to-peer money transfers')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api', app, document);
 
   await app.listen(process.env.PORT ?? 3000);
 }

@@ -1,0 +1,345 @@
+{
+  "info": {
+    "name": "Fintech API",
+    "_postman_id": "fintech-api-collection",
+    "description": "All endpoints for the Fintech API. Set the `access_token` collection variable after login/register to authenticate subsequent requests.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string",
+      "description": "Paste the access_token returned from login or register here"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string",
+      "description": "Paste the refresh_token returned from login or register here"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "register"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"password123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"password123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "refresh"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refresh_token}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "logout"]
+            },
+            "body": {
+              "mode": "none"
+            }
+          }
+        },
+        {
+          "name": "Save Personal Info",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/save-personal-info",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "save-personal-info"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\",\n  \"phoneNumber\": \"08012345678\",\n  \"address\": \"123 Main Street, Lagos\",\n  \"dateOfBirth\": \"1995-06-15\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Validate BVN",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/validate-bvn",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "validate-bvn"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bvn\": \"12345678901\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Validate NIN",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/validate-nin",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "validate-nin"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nin\": \"12345678901\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Set Transaction PIN",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/set-transaction-pin",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "set-transaction-pin"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pin\": 1234,\n  \"confirmPin\": 1234\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Promote to Admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/promote-to-admin",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "promote-to-admin"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"adminSecret\": \"your_admin_secret_here\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Account",
+      "item": [
+        {
+          "name": "Account Lookup",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/account/account-lookup",
+              "host": ["{{base_url}}"],
+              "path": ["account", "account-lookup"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountNumber\": \"1234567890\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Get All Accounts",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/account/get-all-accounts",
+              "host": ["{{base_url}}"],
+              "path": ["account", "get-all-accounts"]
+            }
+          }
+        },
+        {
+          "name": "Get Account Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/account/get-account-details?accountId=1",
+              "host": ["{{base_url}}"],
+              "path": ["account", "get-account-details"],
+              "query": [
+                { "key": "accountId", "value": "1", "description": "The ID of the account to retrieve" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transaction",
+      "item": [
+        {
+          "name": "Admin Fund User Account",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/transaction/fund-user-account",
+              "host": ["{{base_url}}"],
+              "path": ["transaction", "fund-user-account"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountNumber\": \"1234567890\",\n  \"transactionPin\": 1234,\n  \"amount\": 10000\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Send Money",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/transaction/send-money",
+              "host": ["{{base_url}}"],
+              "path": ["transaction", "send-money"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountNumber\": \"1234567890\",\n  \"transactionPin\": 1234,\n  \"amount\": 500,\n  \"description\": \"Rent payment\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Get All Transactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/transaction/get-all-transactions?accountId=1&page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["transaction", "get-all-transactions"],
+              "query": [
+                { "key": "accountId", "value": "1", "description": "The ID of the account" },
+                { "key": "page", "value": "1", "description": "Page number (default: 1)" },
+                { "key": "limit", "value": "10", "description": "Results per page (default: 10)" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Transaction",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/transaction/get-transaction?transactionId=1",
+              "host": ["{{base_url}}"],
+              "path": ["transaction", "get-transaction"],
+              "query": [
+                { "key": "transactionId", "value": "1", "description": "The ID of the transaction to retrieve" }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

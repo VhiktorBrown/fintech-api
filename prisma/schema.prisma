@@ -33,7 +33,8 @@ model User {
   lastName String?
   phoneNumber String? @unique
 
-  dateOfBirth String?
+  // stored as DateTime so age validation and date arithmetic work correctly
+  dateOfBirth DateTime?
   address String?
 
   email String @unique
@@ -95,8 +96,10 @@ model Transaction {
   status TransactionStatus
   description String?
 
-  balancebefore Decimal @db.Decimal(18, 2)
-  balanceAfter Decimal @db.Decimal(18, 2)
+  // @map keeps the existing DB column name ("balancebefore") while exposing
+  // the correctly-cased "balanceBefore" field in TypeScript — no migration needed
+  balanceBefore Decimal @db.Decimal(18, 2) @map("balancebefore")
+  balanceAfter  Decimal @db.Decimal(18, 2)
 
   accountId Int?
   account Account? @relation(fields: [accountId], references: [id], name: "PrimaryAccount")

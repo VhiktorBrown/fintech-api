@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { FundUserAccountDto } from './dto/fund-user-account.dto';
+import { AdminFundDto } from './dto/admin-fund.dto';
+import { SendMoneyDto } from './dto/send-money.dto';
 import { TransactionStatus, TransactionType } from '@prisma/client';
 import { generateTransactionReference } from 'src/shared/functions';
 import { AppResponse } from 'src/shared/app-response';
@@ -15,10 +15,10 @@ export class TransactionService {
 
     async fundUserAccountByAdmin(
         userId: number,
-        dto: FundUserAccountDto
+        dto: AdminFundDto
     ) {
         return this.prisma.$transaction(async (tx) => {
-            //first, confirm that the requesting user is an admin
+            //confirm that the requesting user is an admin
             const user = await tx.user.findUnique({
                 where: {id: userId}
             });
@@ -75,7 +75,7 @@ export class TransactionService {
                     status: TransactionStatus.PENDING,
                     description: 'Admin funding',
                     accountId: account.id,
-                    balancebefore: Number(account.balance),
+                    balanceBefore: Number(account.balance),
                     balanceAfter: Number(account.balance) - dto.amount,
                     counterpartyAccountId: recipientAccount.id,
                 }
@@ -90,7 +90,7 @@ export class TransactionService {
                     status: TransactionStatus.PENDING,
                     description: 'Admin funding',
                     accountId: recipientAccount.id,
-                    balancebefore: Number(recipientAccount.balance),
+                    balanceBefore: Number(recipientAccount.balance),
                     balanceAfter: Number(recipientAccount.balance) + dto.amount,
                     counterpartyAccountId: account.id,
                 }
@@ -100,7 +100,7 @@ export class TransactionService {
             await tx.account.update({
                 where: {id: account.id},
                 data: {
-                    balance : { decrement: dto.amount},
+                    balance: { decrement: dto.amount},
                     lastTransactionDate: new Date(),
                 }
             });
@@ -131,7 +131,7 @@ export class TransactionService {
 
     async sendMoney(
         userId: number,
-        dto: FundUserAccountDto){
+        dto: SendMoneyDto){
             return this.prisma.$transaction(async (tx) => {
 
                 const user = await tx.user.findUnique({
@@ -165,14 +165,50 @@ export class TransactionService {
                     AppResponse.error('Account details not found', HttpStatus.NOT_FOUND);
                 }
 
+                //reject transfers to or from deactivated accounts
+                if(!account.isActive){
+                    AppResponse.error('Your account is deactivated and cannot send money', HttpStatus.FORBIDDEN);
+                }
+
+                if(!recipientAccount.isActive){
+                    AppResponse.error('The recipient account is deactivated', HttpStatus.FORBIDDEN);
+                }
+
+                //a user should not be able to send money to their own account
+                if(account.accountNumber === recipientAccount.accountNumber){
+                    AppResponse.error("Sorry, you cannot send money to yourself", HttpStatus.FORBIDDEN);
+                }
+
                 //ensure the sender has enough balance to cover the transfer
                 if(dto.amount > Number(account.balance)){
                     AppResponse.error('Insufficient account balance', HttpStatus.FORBIDDEN);
                 }
 
-                //a user should not be able to send money to their own account
-                if(account.accountNumber == recipientAccount.accountNumber){
-                    AppResponse.error("Sorry, you cannot send money to yourself", HttpStatus.FORBIDDEN);
+                //enforce the daily transaction limit if one is set on the account.
+                //we sum all debit transactions made today to see if this transfer
+                //would push the total over the configured limit
+                if(account.dailyTransactionLimit !== null){
+                    const startOfDay = new Date();
+                    startOfDay.setHours(0, 0, 0, 0);
+
+                    const todaysDebits = await tx.transaction.aggregate({
+                        where: {
+                            accountId: account.id,
+                            type: TransactionType.DEBIT,
+                            createdAt: { gte: startOfDay },
+                        },
+                        _sum: { amount: true }
+                    });
+
+                    const totalSpentToday = Number(todaysDebits._sum.amount ?? 0);
+                    const dailyLimit = Number(account.dailyTransactionLimit);
+
+                    if(totalSpentToday + dto.amount > dailyLimit){
+                        AppResponse.error(
+                            `This transfer would exceed your daily limit of ${dailyLimit}`,
+                            HttpStatus.FORBIDDEN
+                        );
+                    }
                 }
 
                 const reference = generateTransactionReference();
@@ -187,7 +223,7 @@ export class TransactionService {
                         description: dto.description
                         ?? `Transfer to ${recipientAccount.user.firstName} ${recipientAccount.accountNumber}`,
                         accountId: account.id,
-                        balancebefore: Number(account.balance),
+                        balanceBefore: Number(account.balance),
                         balanceAfter: Number(account.balance) - dto.amount,
                         counterpartyAccountId: recipientAccount.id,
                     }
@@ -203,7 +239,7 @@ export class TransactionService {
                         description: dto.description ??
                          `Transfer from ${account.user.firstName} ${account.accountNumber}`,
                         accountId: recipientAccount.id,
-                        balancebefore: Number(recipientAccount.balance),
+                        balanceBefore: Number(recipientAccount.balance),
                         balanceAfter: Number(recipientAccount.balance) + dto.amount,
                         counterpartyAccountId: account.id,
                     }
@@ -213,7 +249,7 @@ export class TransactionService {
                 await tx.account.update({
                     where: {id: account.id},
                     data: {
-                        balance : { decrement: dto.amount},
+                        balance: { decrement: dto.amount},
                         lastTransactionDate: new Date(),
                     }
                 });
@@ -242,10 +278,13 @@ export class TransactionService {
             })
         }
 
-        //fetches all transactions belonging to a specific account
+        //fetches paginated transactions for a specific account.
+        //page and limit default to 1 and 10 respectively if not provided
         async getAllTransactions(
-            userId: number ,
-            accountId: number
+            userId: number,
+            accountId: number,
+            page: number = 1,
+            limit: number = 10,
         ) {
             //verify the account exists and belongs to the requesting user
             const account = await this.prisma.account.findUnique({
@@ -256,36 +295,52 @@ export class TransactionService {
                 AppResponse.error("Account does not exist", HttpStatus.NOT_FOUND);
             }
 
-            const transactions = await this.prisma.transaction.findMany({
-                where: { accountId: account.id },
-                select: {
-                    id: true,
-                    amount: true,
-                    reference: true,
-                    status: true,
-                    description: true,
-                    type: true,
-                    balancebefore: true,
-                    balanceAfter: true,
-                    createdAt: true,
-                    counterpartyAccount: {
-                      select: {
-                        accountNumber: true,
-                        user: {
+            const skip = (page - 1) * limit;
+
+            //fetch the page of transactions and the total count in parallel
+            const [transactions, total] = await Promise.all([
+                this.prisma.transaction.findMany({
+                    where: { accountId: account.id },
+                    select: {
+                        id: true,
+                        amount: true,
+                        reference: true,
+                        status: true,
+                        description: true,
+                        type: true,
+                        balanceBefore: true,
+                        balanceAfter: true,
+                        createdAt: true,
+                        counterpartyAccount: {
                           select: {
-                            firstName: true,
-                            lastName: true
+                            accountNumber: true,
+                            user: {
+                              select: {
+                                firstName: true,
+                                lastName: true
+                              }
+                            }
                           }
                         }
-                      }
-                    }
-                  },
-                orderBy: {
-                    createdAt: 'desc'
+                    },
+                    orderBy: { createdAt: 'desc' },
+                    skip,
+                    take: limit,
+                }),
+                this.prisma.transaction.count({
+                    where: { accountId: account.id }
+                }),
+            ]);
+
+            return AppResponse.success("Transactions retrieved successfully", {
+                transactions,
+                meta: {
+                    total,
+                    page,
+                    limit,
+                    totalPages: Math.ceil(total / limit),
                 }
             });
-
-            return AppResponse.success("Transactions retrieved successfully", { transactions });
         }
 
         //fetches a single transaction by ID, scoped to the requesting user's accounts
@@ -293,13 +348,7 @@ export class TransactionService {
             const transaction = await this.prisma.transaction.findFirst({
                 where: {
                     id: transactionId,
-                    OR: [
-                        {
-                            account: {
-                                userId: userId
-                            }
-                        }
-                    ]
+                    account: { userId: userId }
                 },
                 select: {
                     id: true,
@@ -308,7 +357,7 @@ export class TransactionService {
                     status: true,
                     description: true,
                     type: true,
-                    balancebefore: true,
+                    balanceBefore: true,
                     balanceAfter: true,
                     createdAt: true,
                     counterpartyAccount: {

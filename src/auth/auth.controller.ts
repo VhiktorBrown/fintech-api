@@ -1,26 +1,31 @@
 import { Body, Controller, Post, UseGuards } from "@nestjs/common";
+import { ApiTags, ApiOperation } from "@nestjs/swagger";
 import { AuthService } from "./auth.service";
-import { BvnDto, NinDto, PersonalInfoDto, RegisterDto, TransactionPinDto } from "./dto";
+import { RegisterDto } from "./dto";
 import { SignInDto } from "./dto/sign-in.dto";
 import { JwtGuard } from "./guard";
 import { GetUser } from "./decorator";
 
+@ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
      constructor(private authService: AuthService){}
 
-     @Post('login')
-     async login(@Body() dto: SignInDto){
-        return this.authService.login(dto);
-     }
-
+     @ApiOperation({ summary: 'Register a new user' })
      @Post('register')
      async register(@Body() dto: RegisterDto){
         return this.authService.register(dto);
      }
 
+     @ApiOperation({ summary: 'Login with email and password' })
+     @Post('login')
+     async login(@Body() dto: SignInDto){
+        return this.authService.login(dto);
+     }
+
      //requires an active session — the admin secret is sent here, not at registration,
      //so it is never part of the standard public sign-up flow
+     @ApiOperation({ summary: 'Promote yourself to admin using the admin secret' })
      @UseGuards(JwtGuard)
      @Post('promote-to-admin')
      async promoteToAdmin(
@@ -29,51 +34,19 @@ export class AuthController {
         return this.authService.promoteToAdmin(userId, adminSecret);
      }
 
-     //issues a new access token using a valid refresh token
-     @UseGuards(JwtGuard)
+     //no JWT guard here — the whole point of this endpoint is to be called
+     //when the access token has already expired. the refresh token itself
+     //is used to identify and authenticate the user
+     @ApiOperation({ summary: 'Get a new access token using a refresh token' })
      @Post('refresh')
-     async refresh(
-        @GetUser('id') userId: number,
-        @Body('refreshToken') refreshToken: string){
-        return this.authService.refreshAccessToken(userId, refreshToken);
+     async refresh(@Body('refreshToken') refreshToken: string){
+        return this.authService.refreshAccessToken(refreshToken);
      }
 
-     //clears the refresh token, ending the user's session
+     @ApiOperation({ summary: 'Logout and invalidate the refresh token' })
      @UseGuards(JwtGuard)
      @Post('logout')
      async logout(@GetUser('id') userId: number){
         return this.authService.logout(userId);
-     }
-
-     @UseGuards(JwtGuard)
-     @Post('save-personal-info')
-     async savePersonalInfo(
-      @GetUser('id') userId: number,
-      @Body() dto: PersonalInfoDto){
-      return this.authService.setPersonalInfo(userId, dto);
-     }
-
-     @UseGuards(JwtGuard)
-     @Post('validate-bvn')
-     async enterBvn(
-      @GetUser('id') userId: number,
-      @Body() dto: BvnDto){
-      return this.authService.setBvn(userId, dto);
-     }
-
-     @UseGuards(JwtGuard)
-     @Post('validate-nin')
-     async enterNin(
-      @GetUser('id') userId: number,
-      @Body() dto: NinDto){
-      return this.authService.setNin(userId, dto);
-     }
-
-     @UseGuards(JwtGuard)
-     @Post('set-transaction-pin')
-     async saveTransactionPin(
-      @GetUser('id') userId: number,
-      @Body() dto: TransactionPinDto){
-      return this.authService.setTransactionPin(userId, dto);
      }
 }
