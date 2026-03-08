@@ -19,14 +19,38 @@ export class AuthController {
         return this.authService.register(dto);
      }
 
+     //requires an active session — the admin secret is sent here, not at registration,
+     //so it is never part of the standard public sign-up flow
+     @UseGuards(JwtGuard)
+     @Post('promote-to-admin')
+     async promoteToAdmin(
+        @GetUser('id') userId: number,
+        @Body('adminSecret') adminSecret: string){
+        return this.authService.promoteToAdmin(userId, adminSecret);
+     }
+
+     //issues a new access token using a valid refresh token
+     @UseGuards(JwtGuard)
+     @Post('refresh')
+     async refresh(
+        @GetUser('id') userId: number,
+        @Body('refreshToken') refreshToken: string){
+        return this.authService.refreshAccessToken(userId, refreshToken);
+     }
+
+     //clears the refresh token, ending the user's session
+     @UseGuards(JwtGuard)
+     @Post('logout')
+     async logout(@GetUser('id') userId: number){
+        return this.authService.logout(userId);
+     }
+
      @UseGuards(JwtGuard)
      @Post('save-personal-info')
      async savePersonalInfo(
       @GetUser('id') userId: number,
       @Body() dto: PersonalInfoDto){
-      return this.authService.setPersonalInfo(
-         userId,
-         dto);
+      return this.authService.setPersonalInfo(userId, dto);
      }
 
      @UseGuards(JwtGuard)
@@ -34,9 +58,7 @@ export class AuthController {
      async enterBvn(
       @GetUser('id') userId: number,
       @Body() dto: BvnDto){
-      return this.authService.setBvn(
-         userId,
-         dto);
+      return this.authService.setBvn(userId, dto);
      }
 
      @UseGuards(JwtGuard)
@@ -44,18 +66,14 @@ export class AuthController {
      async enterNin(
       @GetUser('id') userId: number,
       @Body() dto: NinDto){
-      return this.authService.setNin(
-         userId,
-         dto);
+      return this.authService.setNin(userId, dto);
      }
-     
+
      @UseGuards(JwtGuard)
      @Post('set-transaction-pin')
      async saveTransactionPin(
       @GetUser('id') userId: number,
       @Body() dto: TransactionPinDto){
-      return this.authService.setTransactionPin(
-         userId,
-         dto);
+      return this.authService.setTransactionPin(userId, dto);
      }
 }

@@ -1,9 +1,11 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { FundUserAccountDto } from './dto/fund-user-account.dto';
 import { TransactionStatus, TransactionType } from '@prisma/client';
 import { generateTransactionReference } from 'src/shared/functions';
+import { AppResponse } from 'src/shared/app-response';
+import * as argon from 'argon2';
 
 @Injectable()
 export class TransactionService {
@@ -16,66 +18,55 @@ export class TransactionService {
         dto: FundUserAccountDto
     ) {
         return this.prisma.$transaction(async (tx) => {
-            //first, we need to confirm that user is an admin
+            //first, confirm that the requesting user is an admin
             const user = await tx.user.findUnique({
                 where: {id: userId}
             });
 
             if(!user.isAdmin){
-                return new ForbiddenException(
-                    'You cannot perform this operation'
-                );
+                AppResponse.error('You cannot perform this operation', HttpStatus.FORBIDDEN);
             }
             /*
                 For testing purposes, there's only going to be one admin account.
                 So, that we will use that for funding user accounts.
             */
 
-            //check if transaction pin is correct
-            if(user.pin !== dto.transactionPin.toString()){
-                return new ForbiddenException(
-                    "Invalid transaction pin"
-                );
+            //verify the transaction pin against the stored hash
+            const pinMatches = await argon.verify(
+                user.pin,
+                dto.transactionPin.toString()
+            );
+            if(!pinMatches){
+                AppResponse.error("Invalid transaction pin", HttpStatus.FORBIDDEN);
             }
 
-            //Fetch admin's account.
+            //fetch admin's account
             const account = await tx.account.findFirst({
                 where: { userId: userId }
             });
 
-            //fetch recipient's account
+            //fetch recipient's account by account number
             const recipientAccount = await tx.account.findUnique({
                 where: { accountNumber: dto.accountNumber}
             });
 
             if(!recipientAccount){
-                throw new ForbiddenException(
-                    "Account does not exist"
-                );
+                AppResponse.error("Account does not exist", HttpStatus.NOT_FOUND);
             }
 
-            //prevent user/admin from funding themselves
+            //an admin should not be able to fund their own account through this endpoint
             if(account.accountNumber === recipientAccount.accountNumber){
-                throw new ForbiddenException(
-                    "Sorry, you cannot fund yourself."
-                );
+                AppResponse.error("Sorry, you cannot fund yourself.", HttpStatus.FORBIDDEN);
             }
 
-            //If reciepient account not found
-            if(!recipientAccount){
-                throw new ForbiddenException('Account details not found');
-            }
-
-            //Next, check balance to see if it is sufficient.
-            if(dto.amount > account.balance){
-                    return new ForbiddenException(
-                        'Insufficient account balance'
-                    );
+            //ensure the admin account has enough balance to cover the transfer
+            if(dto.amount > Number(account.balance)){
+                AppResponse.error('Insufficient account balance', HttpStatus.FORBIDDEN);
             }
 
             const reference = generateTransactionReference();
 
-            //If sufficient, create a transaction for the sender
+            //record the debit leg of the transaction for the admin's account
             const debitTransaction = await tx.transaction.create({
                 data: {
                     type: TransactionType.DEBIT,
@@ -84,13 +75,13 @@ export class TransactionService {
                     status: TransactionStatus.PENDING,
                     description: 'Admin funding',
                     accountId: account.id,
-                    balancebefore: account.balance,
-                    balanceAfter: account.balance - dto.amount,
+                    balancebefore: Number(account.balance),
+                    balanceAfter: Number(account.balance) - dto.amount,
                     counterpartyAccountId: recipientAccount.id,
                 }
             });
 
-            //create a transaction for the recipient
+            //record the credit leg of the transaction for the recipient's account
             const creditTransaction = await tx.transaction.create({
                 data: {
                     type: TransactionType.CREDIT,
@@ -99,46 +90,42 @@ export class TransactionService {
                     status: TransactionStatus.PENDING,
                     description: 'Admin funding',
                     accountId: recipientAccount.id,
-                    balancebefore: recipientAccount.balance,
-                    balanceAfter: recipientAccount.balance + dto.amount,
+                    balancebefore: Number(recipientAccount.balance),
+                    balanceAfter: Number(recipientAccount.balance) + dto.amount,
                     counterpartyAccountId: account.id,
                 }
             });
 
-            //then, deduct the money
+            //deduct from the admin's balance
             await tx.account.update({
                 where: {id: account.id},
-                data: { 
+                data: {
                     balance : { decrement: dto.amount},
                     lastTransactionDate: new Date(),
                 }
             });
 
-            //then, add the money to recipient's account
+            //credit the recipient's balance
             await tx.account.update({
                 where: { id: recipientAccount.id },
-                data: { 
+                data: {
                     balance: {increment: dto.amount},
                     lastTransactionDate: new Date(),
                 }
             });
 
-            //update debit transaction by marking as successful
+            //mark both legs of the transaction as successful
             await tx.transaction.update({
                 where: { id: debitTransaction.id},
                 data: { status: TransactionStatus.SUCCESS }
             });
 
-            //update credit transaction by marking as successful
             await tx.transaction.update({
                 where: { id: creditTransaction.id},
                 data: { status: TransactionStatus.SUCCESS }
             });
 
-            return {
-                success: true,
-                message: "Admin funding successful"
-            };
+            return AppResponse.success("Admin funding successful");
         });
     }
 
@@ -146,68 +133,67 @@ export class TransactionService {
         userId: number,
         dto: FundUserAccountDto){
             return this.prisma.$transaction(async (tx) => {
-                
+
                 const user = await tx.user.findUnique({
                     where: {id: userId}
                 });
-    
-                //check if transaction pin is correct
-                if(user.pin !== dto.transactionPin.toString()){
-                    return new ForbiddenException(
-                        "Invalid transaction pin"
-                    );
+
+                //user.pin holds an argon2 hash, so we must use argon.verify
+                //to compare it against the raw pin value from the request.
+                //a direct string comparison would never match
+                const pinMatches = await argon.verify(
+                    user.pin,
+                    dto.transactionPin.toString()
+                );
+                if(!pinMatches){
+                    AppResponse.error("Invalid transaction pin", HttpStatus.FORBIDDEN);
                 }
-    
-                //Fetch sender's account.
+
+                //fetch the sender's account
                 const account = await tx.account.findFirst({
                     where: { userId: userId },
                     include: { user: true }
                 });
-    
-                //fetch recipient's account
+
+                //fetch the recipient's account by account number
                 const recipientAccount = await tx.account.findUnique({
                     where: { accountNumber: dto.accountNumber},
-                    include: { user: true } 
+                    include: { user: true }
                 });
-    
-                //If reciepient account not found
+
                 if(!recipientAccount){
-                    throw new ForbiddenException('Account details not found');
-                }
-    
-                //Next, check balance to see if it is sufficient.
-                if(dto.amount > account.balance){
-                        return new ForbiddenException(
-                            'Insufficient account balance'
-                        );
+                    AppResponse.error('Account details not found', HttpStatus.NOT_FOUND);
                 }
 
-                //prevent user from sending money to themselves
+                //ensure the sender has enough balance to cover the transfer
+                if(dto.amount > Number(account.balance)){
+                    AppResponse.error('Insufficient account balance', HttpStatus.FORBIDDEN);
+                }
+
+                //a user should not be able to send money to their own account
                 if(account.accountNumber == recipientAccount.accountNumber){
-                    throw new ForbiddenException(
-                        "Sorry, you cannot send money to yourself"
-                    );
+                    AppResponse.error("Sorry, you cannot send money to yourself", HttpStatus.FORBIDDEN);
                 }
 
                 const reference = generateTransactionReference();
 
-                //If sufficient, create a transaction for the sender
+                //record the debit leg for the sender
                 const debitTransaction = await tx.transaction.create({
                     data: {
                         type: TransactionType.DEBIT,
                         amount: dto.amount,
                         reference: reference,
                         status: TransactionStatus.PENDING,
-                        description: dto.description 
+                        description: dto.description
                         ?? `Transfer to ${recipientAccount.user.firstName} ${recipientAccount.accountNumber}`,
                         accountId: account.id,
-                        balancebefore: account.balance,
-                        balanceAfter: account.balance - dto.amount,
+                        balancebefore: Number(account.balance),
+                        balanceAfter: Number(account.balance) - dto.amount,
                         counterpartyAccountId: recipientAccount.id,
                     }
                 });
 
-                //create a transaction for the recipient
+                //record the credit leg for the recipient
                 const creditTransaction = await tx.transaction.create({
                     data: {
                         type: TransactionType.CREDIT,
@@ -217,63 +203,57 @@ export class TransactionService {
                         description: dto.description ??
                          `Transfer from ${account.user.firstName} ${account.accountNumber}`,
                         accountId: recipientAccount.id,
-                        balancebefore: recipientAccount.balance,
-                        balanceAfter: recipientAccount.balance + dto.amount,
+                        balancebefore: Number(recipientAccount.balance),
+                        balanceAfter: Number(recipientAccount.balance) + dto.amount,
                         counterpartyAccountId: account.id,
                     }
                 });
-    
-                //then, deduct the money
+
+                //deduct from sender's balance
                 await tx.account.update({
                     where: {id: account.id},
-                    data: { 
+                    data: {
                         balance : { decrement: dto.amount},
                         lastTransactionDate: new Date(),
                     }
                 });
-    
-                //then, add the money to recipient's account
+
+                //credit the recipient's balance
                 await tx.account.update({
                     where: { id: recipientAccount.id },
-                    data: { 
+                    data: {
                         balance: {increment: dto.amount},
                         lastTransactionDate: new Date(),
                     }
                 });
-    
-                //update debit transaction by marking as successful
+
+                //mark both legs of the transaction as successful
                 await tx.transaction.update({
                     where: { id: debitTransaction.id},
                     data: { status: TransactionStatus.SUCCESS }
                 });
 
-                //update credit transaction by marking as successful
                 await tx.transaction.update({
                     where: { id: creditTransaction.id},
                     data: { status: TransactionStatus.SUCCESS }
                 });
-    
-                return {
-                    success: true,
-                    message: "Transfer successful"
-                };
+
+                return AppResponse.success("Transfer successful");
             })
         }
 
-        //Fetches all user's transactions
+        //fetches all transactions belonging to a specific account
         async getAllTransactions(
             userId: number ,
             accountId: number
         ) {
-            //check if that account belongs to user
+            //verify the account exists and belongs to the requesting user
             const account = await this.prisma.account.findUnique({
                 where: { id: accountId, userId: userId }
             });
 
             if(!account){
-                return new ForbiddenException(
-                    "Account does not exist"
-                );
+                AppResponse.error("Account does not exist", HttpStatus.NOT_FOUND);
             }
 
             const transactions = await this.prisma.transaction.findMany({
@@ -305,14 +285,10 @@ export class TransactionService {
                 }
             });
 
-            return {
-                success: true,
-                message: "Transactions retrieved successfully",
-                transactions: transactions
-            }
+            return AppResponse.success("Transactions retrieved successfully", { transactions });
         }
 
-        //Fetch a single transaction
+        //fetches a single transaction by ID, scoped to the requesting user's accounts
         async getTransaction(userId: number, transactionId: number) {
             const transaction = await this.prisma.transaction.findFirst({
                 where: {
@@ -350,15 +326,9 @@ export class TransactionService {
             });
 
             if(!transaction){
-                throw new ForbiddenException(
-                    "Transaction not found"
-                );
+                AppResponse.error("Transaction not found", HttpStatus.NOT_FOUND);
             }
 
-            return {
-                success: true,
-                message: "Transaction found",
-                transaction: transaction
-            };
+            return AppResponse.success("Transaction found", { transaction });
         }
 }

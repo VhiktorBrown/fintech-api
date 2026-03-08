@@ -1,7 +1,8 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AccountLookupDto } from './dto';
+import { AppResponse } from 'src/shared/app-response';
 
 @Injectable()
 export class AccountService {
@@ -22,19 +23,15 @@ export class AccountService {
         });
 
         if(!account){
-            return new ForbiddenException(
-                "Account details not found"
-            );
+            AppResponse.error("Account details not found", HttpStatus.NOT_FOUND);
         }
 
-        return {
-            success: true,
-            message: "Account found",
+        return AppResponse.success("Account found", {
             account: {
                 name: `${account.user.firstName} ${account.user.lastName}`,
                 accountNumber: account.accountNumber
             }
-        }
+        });
     }
 
     //fetches all users accounts
@@ -46,11 +43,7 @@ export class AccountService {
             where: {userId: userId }
         });
 
-        return {
-            success: true,
-            message: "Accounts retrieved",
-            accounts: accounts
-        }
+        return AppResponse.success("Accounts retrieved", { accounts });
     }
 
     //fetching user's account details - returns only authenticated user's account details
@@ -65,18 +58,9 @@ export class AccountService {
         });
 
         if(!account){
-            throw new ForbiddenException(
-                'Account details not found'
-            );
+            AppResponse.error('Account details not found', HttpStatus.NOT_FOUND);
         }
 
-        console.log((await account).balance);
-        return {
-            success: true,
-            message: "Account retrieved successfully",
-            account: {
-                ...account
-            }
-        }
+        return AppResponse.success("Account retrieved successfully", { account });
     }
 }

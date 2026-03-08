@@ -1,13 +1,16 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, InternalServerErrorException } from "@nestjs/common";
+import { HttpStatus, Injectable } from "@nestjs/common";
 import { PrismaService } from "src/prisma/prisma.service";
+import { AppResponse } from "src/shared/app-response";
 import { SignInDto } from "./dto/sign-in.dto";
 import { BvnDto, NinDto, PersonalInfoDto, RegisterDto, TransactionPinDto } from "./dto";
 import { JwtService } from "@nestjs/jwt";
 import { ConfigService } from "@nestjs/config";
 import * as argon from 'argon2';
+import { randomInt } from 'crypto';
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { AccountType, TransactionStatus, TransactionType } from "@prisma/client";
 import { generateTransactionReference } from "src/shared/functions";
+import { encrypt } from "src/shared/encryption";
 
 @Injectable({})
 export class AuthService {
@@ -17,85 +20,82 @@ export class AuthService {
         private config: ConfigService,
     ){}
 
-    //validates credentials and logs in user if correct
+    //validates credentials and signs in the user if they are correct
     async login(dto: SignInDto){
-        //First, attempt to find user in database.
         const user = await this.prisma.user.findUnique({
             where: { email: dto.email }
         });
-        //If user does not exist, throw appropriate error
+
+        //use a generic message so we don't reveal whether the email exists
         if(!user){
-            throw new ForbiddenException(
-                'Invalid login credentials'
-            );
+            AppResponse.error('Invalid login credentials', HttpStatus.UNAUTHORIZED);
         }
 
-        //If code execution reaches here, it means it found user
-        //So compare passwords
-        const pwMatches = await argon.verify(
-            user.password,
-            dto.password
-        );
-
-        //If incorrect, throw appropriate error
+        const pwMatches = await argon.verify(user.password, dto.password);
         if(!pwMatches){
-            throw new ForbiddenException(
-                'Invalid login credentials'
-            );
+            AppResponse.error('Invalid login credentials', HttpStatus.UNAUTHORIZED);
         }
 
-        //remove the password hash
+        //strip sensitive fields before returning the user object
         delete user.password;
         delete user.bvn;
         delete user.pin;
+        delete user.refreshToken;
 
-        //If execution reaches here, it means that passwords matched
-        //So, send back an auth token after signing
-        return this.signToken(user);
+        return this.signTokens(user);
     }
 
-    //registers user
+    //creates a new user account and returns tokens immediately
     async register(dto: RegisterDto){
-        //first hash the user's password
         const hash = await argon.hash(dto.password);
 
         try {
-            //first, save the user in the database
             const user = await this.prisma.user.create({
                 data: {
                     email: dto.email,
                     password: hash,
-                    isAdmin: dto.adminSecret != null && dto.adminSecret 
-                    === this.config.get('ADMIN_SECRET') ? true : false
                 }
             });
 
-            //remove the password hash
             delete user.password;
-
-            //then, generate a signed token and return that with the user details
-            return this.signToken(user);
+            return this.signTokens(user);
         }catch(error){
-            if(error
-                instanceof
-                PrismaClientKnownRequestError) {
-                    if(error.code == 'P2002'){
-                        throw new ForbiddenException(
-                            'Account already exists'
-                        );
-                    }
+            if(error instanceof PrismaClientKnownRequestError) {
+                if(error.code == 'P2002'){
+                    AppResponse.error('Account already exists', HttpStatus.CONFLICT);
+                }
             }
             throw error;
         }
     }
 
-    //sets personal info of user like first name, last name, etc.
-    async setPersonalInfo(
-        userId: number,
-        dto: PersonalInfoDto){
+    //promotes an existing user to admin using the ADMIN_SECRET from the environment.
+    //kept separate from register so the admin secret is never part of the
+    //standard sign-up flow, reducing the risk of accidental exposure
+    async promoteToAdmin(userId: number, adminSecret: string){
+        const expectedSecret = this.config.get<string>('ADMIN_SECRET');
 
+        if(!adminSecret || adminSecret !== expectedSecret){
+            AppResponse.error('Invalid admin secret', HttpStatus.FORBIDDEN);
+        }
+
+        const user = await this.prisma.user.findUnique({ where: { id: userId } });
+
+        if(user.isAdmin){
+            AppResponse.error('User is already an admin', HttpStatus.CONFLICT);
+        }
+
+        await this.prisma.user.update({
+            where: { id: userId },
+            data: { isAdmin: true }
+        });
+
+        return AppResponse.success('User promoted to admin successfully');
+    }
+
+    //updates the user's profile information
+    async setPersonalInfo(userId: number, dto: PersonalInfoDto){
         try {
-            //update user's personal Info in database.
             const user = await this.prisma.user.update({
                 where: { id: userId },
                 data: {
@@ -107,109 +107,93 @@ export class AuthService {
                 }
             });
 
-            //remove user's password, bvn and pin
             delete user.password;
             delete user.bvn;
             delete user.pin;
+            delete user.refreshToken;
 
-            return {
-                success: true,
-                message: "Personal Info updated successfully",
-                user: {
-                    ...user
-                }
-            }
+            return AppResponse.success("Personal Info updated successfully", { user });
         }catch(error){
-            throw new ForbiddenException();
+            AppResponse.error('Failed to update personal info', HttpStatus.INTERNAL_SERVER_ERROR);
         }
-        
     }
 
-    //sets user's BVN
-    async setBvn(
-        userId: number,
-        dto: BvnDto){
-            // Validate BVN length
-            if (dto.bvn.length !== 11) {
-                throw new BadRequestException("BVN must be exactly 11 characters");
-            }
-            try {
-                // Update user's BVN if valid
-                await this.prisma.user.update({
-                    where: { id: userId },
-                    data: { bvn: dto.bvn }
-                });
-        
-                return {
-                    success: true,
-                    message: "BVN successfully set",
-                };
-            } catch (error) {
-            // Handle database errors or unexpected issues
-            throw new InternalServerErrorException(
-                "An unexpected error occurred. Please try again.");
-                }
+    //saves the user's BVN and marks it as verified.
+    //the BVN is encrypted at rest — it is sensitive PII and should never be
+    //stored as plain text in case the database is ever compromised
+    async setBvn(userId: number, dto: BvnDto){
+        if (dto.bvn.length !== 11) {
+            AppResponse.error("BVN must be exactly 11 characters", HttpStatus.BAD_REQUEST);
+        }
+        try {
+            const encryptionKey = this.config.get<string>('ENCRYPTION_KEY');
+            const encryptedBvn = encrypt(dto.bvn, encryptionKey);
+
+            await this.prisma.user.update({
+                where: { id: userId },
+                //set bvnVerified to true so downstream checks can trust this field
+                data: { bvn: encryptedBvn, bvnVerified: true }
+            });
+
+            return AppResponse.success("BVN successfully set");
+        } catch (error) {
+            AppResponse.error("An unexpected error occurred. Please try again.", HttpStatus.INTERNAL_SERVER_ERROR);
+        }
     }
 
-    //sets user's NIN
-    async setNin(
-        userId: number,
-        dto: NinDto){
-            try {
-                //attempt to update only user's NIN
-                const user = await this.prisma.user.update({
-                    where: { id: userId },
-                    data: { nin: dto.nin }
-                });
-                return {
-                    success: true,
-                    message: "NIN successfully set"
-                }
-            } catch(error){
-                throw new ForbiddenException();
-            }
+    //saves the user's NIN and marks it as verified.
+    //encrypted for the same reason as BVN — it is a national identity number
+    async setNin(userId: number, dto: NinDto){
+        try {
+            const encryptionKey = this.config.get<string>('ENCRYPTION_KEY');
+            const encryptedNin = encrypt(dto.nin, encryptionKey);
+
+            await this.prisma.user.update({
+                where: { id: userId },
+                //set ninVerified to true so downstream checks can trust this field
+                data: { nin: encryptedNin, ninVerified: true }
+            });
+            return AppResponse.success("NIN successfully set");
+        } catch(error){
+            AppResponse.error("Failed to update NIN", HttpStatus.INTERNAL_SERVER_ERROR);
+        }
     }
 
-    //sets user's Transaction Pin and create an account if none exists
-    async setTransactionPin(
-        userId: number,
-        dto: TransactionPinDto){
-        // Find the user in the database
+    //sets the transaction PIN and creates a bank account if the user doesn't have one yet
+    async setTransactionPin(userId: number, dto: TransactionPinDto){
         const user = await this.prisma.user.findUnique({
-            where: { id: userId }, 
+            where: { id: userId },
         });
 
-        // If the user does not exist, throw an error
         if (!user) {
-            throw new ForbiddenException('User does not exist');
+            AppResponse.error('User does not exist', HttpStatus.NOT_FOUND);
         }
 
-        // Check if the transaction PIN is already set
         if (user.pin !== null) {
-            throw new ConflictException('Transaction PIN is already set.');
+            AppResponse.error('Transaction PIN is already set.', HttpStatus.CONFLICT);
         }
 
-        // Confirm that both pins match
         if (dto.pin !== dto.confirmPin) {
-            throw new ForbiddenException("Pins don't match");
+            AppResponse.error("Pins don't match", HttpStatus.BAD_REQUEST);
         }
 
-        // Update the user with the new transaction PIN
+        const hashedPin = await argon.hash(dto.pin.toString());
+
         await this.prisma.user.update({
             where: { id: userId },
-            data: { pin: dto.pin.toString() }
+            data: { pin: hashedPin }
         });
 
-        //check if user already has a bank account
-        const account = await this.prisma.account.findFirst({
-            where: { userId: userId},
+        //check if the user already has an account before creating one
+        const existingAccount = await this.prisma.account.findFirst({
+            where: { userId: userId },
         });
 
-        if(!account){
-            // Generate a unique account number (e.g., random 10-digit number)
-            const accountNumber = Math.floor(1000000000 + Math.random() * 9000000000).toString();
+        if(!existingAccount){
+            //use crypto.randomInt instead of Math.random() because Math.random()
+            //is not cryptographically secure and can produce predictable sequences
+            const accountNumber = randomInt(1_000_000_000, 9_999_999_999).toString();
 
-            // Create the account for the user
             const account = await this.prisma.account.create({
                 data: {
                     accountNumber: accountNumber,
@@ -223,8 +207,8 @@ export class AuthService {
                 }
             });
 
-            //create a transaction if user is an admin so that we keep track
-            //of the amount funded
+            //record the initial credit as a transaction so the admin balance
+            //is fully traceable from day one
             if(user.isAdmin){
                 await this.prisma.transaction.create({
                     data: {
@@ -240,40 +224,72 @@ export class AuthService {
                     }
                 });
             }
-            return {
-                success: true,
-                message: "Transaction PIN set successfully, and account created."
-            };
-        }else {
-            return {
-                success: true,
-                message: "Transaction PIN set successfully"
-            }
+            return AppResponse.success("Transaction PIN set successfully, and account created.");
+        } else {
+            return AppResponse.success("Transaction PIN set successfully");
         }
     }
 
-    //This is to generate a JWT token.
-    async signToken(user: any) : Promise<{}>{
-        //create the payload that we want to sign
-        const payload = {
-            sub: user.id,
-            email: user.email
-        };
-        //fetch our secret from our ENV file
-        const secret = this.config.get('JWT_SECRET');
-        //Next, sign the payload and generate the token
-        const token = await this.jwt.signAsync(payload, {
-            expiresIn: '1d',
-            secret: secret,
+    //uses the refresh token to issue a new access token without requiring re-login
+    async refreshAccessToken(userId: number, refreshToken: string){
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId }
         });
 
-        //return both the access token and the user's details
-        return {
-            user: {
-                ...user
-            },
-            "access_token": token
-        };
+        //if the user has no refresh token stored, they are logged out
+        if(!user || !user.refreshToken){
+            AppResponse.error('Access denied', HttpStatus.UNAUTHORIZED);
+        }
 
+        //verify the incoming token against the stored hash
+        const tokenMatches = await argon.verify(user.refreshToken, refreshToken);
+        if(!tokenMatches){
+            AppResponse.error('Access denied', HttpStatus.UNAUTHORIZED);
+        }
+
+        //issue a fresh access token only — the refresh token stays the same
+        const payload = { sub: user.id, email: user.email };
+        const secret = this.config.get('JWT_SECRET');
+        const accessToken = await this.jwt.signAsync(payload, {
+            expiresIn: '15m',
+            secret,
+        });
+
+        return AppResponse.success('Token refreshed', { access_token: accessToken });
+    }
+
+    //clears the stored refresh token, effectively logging the user out
+    async logout(userId: number){
+        await this.prisma.user.update({
+            where: { id: userId },
+            data: { refreshToken: null }
+        });
+
+        return AppResponse.success('Logged out successfully');
+    }
+
+    //generates both an access token (short-lived) and a refresh token (long-lived).
+    //the refresh token is hashed before being stored — we never persist raw tokens
+    async signTokens(user: any){
+        const payload = { sub: user.id, email: user.email };
+        const secret = this.config.get('JWT_SECRET');
+
+        const [accessToken, refreshToken] = await Promise.all([
+            this.jwt.signAsync(payload, { expiresIn: '15m', secret }),
+            this.jwt.signAsync(payload, { expiresIn: '7d',  secret }),
+        ]);
+
+        //hash and store the refresh token so even a DB leak doesn't expose it
+        const hashedRefreshToken = await argon.hash(refreshToken);
+        await this.prisma.user.update({
+            where: { id: user.id },
+            data: { refreshToken: hashedRefreshToken }
+        });
+
+        return AppResponse.success('Success', {
+            user,
+            access_token: accessToken,
+            refresh_token: refreshToken,
+        });
     }
 }

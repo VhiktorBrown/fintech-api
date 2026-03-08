@@ -1,9 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -51,6 +48,10 @@ model User {
 
   isAdmin Boolean @default(false)
 
+  // stores a hash of the refresh token so the raw token is never persisted.
+  // null means the user is logged out
+  refreshToken String?
+
   accounts Account[]
 
   @@map("users")
@@ -60,13 +61,16 @@ model Account {
   id Int @id @default(autoincrement())
 
   accountNumber String @unique
-  balance Float @default(0.0)
+
+  // Decimal instead of Float to avoid floating-point rounding errors
+  // that can silently corrupt financial calculations (e.g. 0.1 + 0.2 != 0.3)
+  balance Decimal @default(0.0) @db.Decimal(18, 2)
   canDebit Boolean @default(true)
   canCredit Boolean @default(true)
   isActive Boolean @default(true)
 
   accountType AccountType
-  dailyTransactionLimit Float?
+  dailyTransactionLimit Decimal? @db.Decimal(18, 2)
   lastTransactionDate DateTime?
 
   userId Int
@@ -85,13 +89,14 @@ model Transaction {
   id Int @id @default(autoincrement())
 
   type TransactionType
-  amount Float
+  // Decimal for the same reason as Account.balance
+  amount Decimal @db.Decimal(18, 2)
   reference String
   status TransactionStatus
   description String?
 
-  balancebefore Float
-  balanceAfter Float
+  balancebefore Decimal @db.Decimal(18, 2)
+  balanceAfter Decimal @db.Decimal(18, 2)
 
   accountId Int?
   account Account? @relation(fields: [accountId], references: [id], name: "PrimaryAccount")
@@ -103,5 +108,4 @@ model Transaction {
   updatedAt DateTime @updatedAt
 
   @@map("transactions")
-
 }
