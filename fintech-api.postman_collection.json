@@ -1,8 +1,8 @@
 {
   "info": {
     "name": "Fintech API",
-    "_postman_id": "fintech-api-collection",
-    "description": "All endpoints for the Fintech API. Set the `access_token` collection variable after login/register to authenticate subsequent requests.",
+    "_postman_id": "fintech-api-collection-v2",
+    "description": "Wallet system with Paystack virtual accounts.\n\n**Setup:**\n1. Register → the response body contains `accessToken` and `refreshToken` — the collection saves them automatically via test scripts.\n2. Complete profile: set personal info → set BVN → set transaction PIN (this creates your wallet and kicks off DVA assignment).\n3. Poll `GET /wallet` until `virtualAccountStatus` is `ACTIVE`, then use `GET /wallet/virtual-account` to see your account number.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -15,13 +15,13 @@
       "key": "access_token",
       "value": "",
       "type": "string",
-      "description": "Paste the access_token returned from login or register here"
+      "description": "Auto-populated after login or register"
     },
     {
       "key": "refresh_token",
       "value": "",
       "type": "string",
-      "description": "Paste the refresh_token returned from login or register here"
+      "description": "Auto-populated after login or register"
     }
   ],
   "item": [
@@ -30,6 +30,22 @@
       "item": [
         {
           "name": "Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.accessToken) {",
+                  "  pm.collectionVariables.set('access_token', res.accessToken);",
+                  "  pm.collectionVariables.set('refresh_token', res.refreshToken);",
+                  "  console.log('Tokens saved automatically');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -42,13 +58,29 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"password123\"\n}",
+              "raw": "{\n  \"email\": \"john@example.com\",\n  \"password\": \"password123\"\n}",
               "options": { "raw": { "language": "json" } }
             }
           }
         },
         {
           "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.accessToken) {",
+                  "  pm.collectionVariables.set('access_token', res.accessToken);",
+                  "  pm.collectionVariables.set('refresh_token', res.refreshToken);",
+                  "  console.log('Tokens saved automatically');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -61,13 +93,29 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"password123\"\n}",
+              "raw": "{\n  \"email\": \"john@example.com\",\n  \"password\": \"password123\"\n}",
               "options": { "raw": { "language": "json" } }
             }
           }
         },
         {
           "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.accessToken) {",
+                  "  pm.collectionVariables.set('access_token', res.accessToken);",
+                  "  pm.collectionVariables.set('refresh_token', res.refreshToken);",
+                  "  console.log('Tokens refreshed automatically');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -81,103 +129,6 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"refreshToken\": \"{{refresh_token}}\"\n}",
-              "options": { "raw": { "language": "json" } }
-            }
-          }
-        },
-        {
-          "name": "Logout",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{access_token}}" }
-            ],
-            "url": {
-              "raw": "{{base_url}}/auth/logout",
-              "host": ["{{base_url}}"],
-              "path": ["auth", "logout"]
-            },
-            "body": {
-              "mode": "none"
-            }
-          }
-        },
-        {
-          "name": "Save Personal Info",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{access_token}}" }
-            ],
-            "url": {
-              "raw": "{{base_url}}/auth/save-personal-info",
-              "host": ["{{base_url}}"],
-              "path": ["auth", "save-personal-info"]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\",\n  \"phoneNumber\": \"08012345678\",\n  \"address\": \"123 Main Street, Lagos\",\n  \"dateOfBirth\": \"1995-06-15\"\n}",
-              "options": { "raw": { "language": "json" } }
-            }
-          }
-        },
-        {
-          "name": "Validate BVN",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{access_token}}" }
-            ],
-            "url": {
-              "raw": "{{base_url}}/auth/validate-bvn",
-              "host": ["{{base_url}}"],
-              "path": ["auth", "validate-bvn"]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"bvn\": \"12345678901\"\n}",
-              "options": { "raw": { "language": "json" } }
-            }
-          }
-        },
-        {
-          "name": "Validate NIN",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{access_token}}" }
-            ],
-            "url": {
-              "raw": "{{base_url}}/auth/validate-nin",
-              "host": ["{{base_url}}"],
-              "path": ["auth", "validate-nin"]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"nin\": \"12345678901\"\n}",
-              "options": { "raw": { "language": "json" } }
-            }
-          }
-        },
-        {
-          "name": "Set Transaction PIN",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{access_token}}" }
-            ],
-            "url": {
-              "raw": "{{base_url}}/auth/set-transaction-pin",
-              "host": ["{{base_url}}"],
-              "path": ["auth", "set-transaction-pin"]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"pin\": 1234,\n  \"confirmPin\": 1234\n}",
               "options": { "raw": { "language": "json" } }
             }
           }
@@ -201,14 +152,65 @@
               "options": { "raw": { "language": "json" } }
             }
           }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "logout"]
+            },
+            "body": {
+              "mode": "none"
+            }
+          }
         }
       ]
     },
     {
-      "name": "Account",
+      "name": "Users",
       "item": [
         {
-          "name": "Account Lookup",
+          "name": "Get My Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/me",
+              "host": ["{{base_url}}"],
+              "path": ["users", "me"]
+            }
+          }
+        },
+        {
+          "name": "Update Personal Info",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/personal-info",
+              "host": ["{{base_url}}"],
+              "path": ["users", "personal-info"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\",\n  \"phoneNumber\": \"+2348100000000\",\n  \"address\": \"123 Main Street, Lagos\",\n  \"dateOfBirth\": \"1995-06-15\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Set BVN",
           "request": {
             "method": "POST",
             "header": [
@@ -216,9 +218,126 @@
               { "key": "Authorization", "value": "Bearer {{access_token}}" }
             ],
             "url": {
-              "raw": "{{base_url}}/account/account-lookup",
+              "raw": "{{base_url}}/users/bvn",
               "host": ["{{base_url}}"],
-              "path": ["account", "account-lookup"]
+              "path": ["users", "bvn"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bvn\": \"20012345678\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Set NIN",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/nin",
+              "host": ["{{base_url}}"],
+              "path": ["users", "nin"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nin\": \"12345678901\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Set Transaction PIN",
+          "description": "Creates wallet + kicks off Paystack DVA assignment. Requires personal info and BVN to be set first. The wallet starts with virtualAccountStatus: PENDING — poll GET /wallet until it becomes ACTIVE.",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/transaction-pin",
+              "host": ["{{base_url}}"],
+              "path": ["users", "transaction-pin"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pin\": 1234,\n  \"confirmPin\": 1234\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Change Transaction PIN",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/transaction-pin",
+              "host": ["{{base_url}}"],
+              "path": ["users", "transaction-pin"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPin\": 1234,\n  \"newPin\": 5678,\n  \"confirmNewPin\": 5678\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Wallet",
+      "item": [
+        {
+          "name": "Get Wallet",
+          "description": "Returns balance, currency, isActive, and virtualAccountStatus. Poll this until virtualAccountStatus is ACTIVE after setting your PIN.",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet",
+              "host": ["{{base_url}}"],
+              "path": ["wallet"]
+            }
+          }
+        },
+        {
+          "name": "Get Virtual Account",
+          "description": "Returns your Paystack-assigned bank account number and bank name. Share this with anyone who wants to send you money. Only available once virtualAccountStatus is ACTIVE.",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet/virtual-account",
+              "host": ["{{base_url}}"],
+              "path": ["wallet", "virtual-account"]
+            }
+          }
+        },
+        {
+          "name": "Lookup Recipient",
+          "description": "Verify a recipient's account before sending money. Pass their virtual account number (the Paystack-assigned bank account number).",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet/lookup",
+              "host": ["{{base_url}}"],
+              "path": ["wallet", "lookup"]
             },
             "body": {
               "mode": "raw",
@@ -228,63 +347,31 @@
           }
         },
         {
-          "name": "Get All Accounts",
+          "name": "Deactivate Wallet",
+          "description": "Soft-deactivates your wallet. No transfers in or out are possible while inactive.",
           "request": {
-            "method": "GET",
+            "method": "PATCH",
             "header": [
               { "key": "Authorization", "value": "Bearer {{access_token}}" }
             ],
             "url": {
-              "raw": "{{base_url}}/account/get-all-accounts",
+              "raw": "{{base_url}}/wallet/deactivate",
               "host": ["{{base_url}}"],
-              "path": ["account", "get-all-accounts"]
-            }
-          }
-        },
-        {
-          "name": "Get Account Details",
-          "request": {
-            "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{access_token}}" }
-            ],
-            "url": {
-              "raw": "{{base_url}}/account/get-account-details?accountId=1",
-              "host": ["{{base_url}}"],
-              "path": ["account", "get-account-details"],
-              "query": [
-                { "key": "accountId", "value": "1", "description": "The ID of the account to retrieve" }
-              ]
+              "path": ["wallet", "deactivate"]
+            },
+            "body": {
+              "mode": "none"
             }
           }
         }
       ]
     },
     {
-      "name": "Transaction",
+      "name": "Transactions",
       "item": [
         {
-          "name": "Admin Fund User Account",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{access_token}}" }
-            ],
-            "url": {
-              "raw": "{{base_url}}/transaction/fund-user-account",
-              "host": ["{{base_url}}"],
-              "path": ["transaction", "fund-user-account"]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"accountNumber\": \"1234567890\",\n  \"transactionPin\": 1234,\n  \"amount\": 10000\n}",
-              "options": { "raw": { "language": "json" } }
-            }
-          }
-        },
-        {
           "name": "Send Money",
+          "description": "Transfer money to another user. Use their virtual account number (from GET /wallet/virtual-account or POST /wallet/lookup).",
           "request": {
             "method": "POST",
             "header": [
@@ -311,11 +398,10 @@
               { "key": "Authorization", "value": "Bearer {{access_token}}" }
             ],
             "url": {
-              "raw": "{{base_url}}/transaction/get-all-transactions?accountId=1&page=1&limit=10",
+              "raw": "{{base_url}}/transaction/get-all-transactions?page=1&limit=10",
               "host": ["{{base_url}}"],
               "path": ["transaction", "get-all-transactions"],
               "query": [
-                { "key": "accountId", "value": "1", "description": "The ID of the account" },
                 { "key": "page", "value": "1", "description": "Page number (default: 1)" },
                 { "key": "limit", "value": "10", "description": "Results per page (default: 10)" }
               ]
@@ -334,8 +420,34 @@
               "host": ["{{base_url}}"],
               "path": ["transaction", "get-transaction"],
               "query": [
-                { "key": "transactionId", "value": "1", "description": "The ID of the transaction to retrieve" }
+                { "key": "transactionId", "value": "1", "description": "ID of the transaction to retrieve" }
               ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "item": [
+        {
+          "name": "Paystack Webhook (reference)",
+          "description": "This endpoint is called by Paystack, not by you. It is listed here so you can manually replay webhook events during local development via the ngrok inspector at http://localhost:4040.\n\nPaystack signs every request with an HMAC-SHA512 signature in the x-paystack-signature header.",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-paystack-signature", "value": "sha512-signature-from-paystack" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/webhook/paystack",
+              "host": ["{{base_url}}"],
+              "path": ["webhook", "paystack"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"charge.success\",\n  \"data\": {\n    \"reference\": \"17732668945535zvp253mmmlbopl\",\n    \"amount\": 500000,\n    \"channel\": \"dedicated_nuban\",\n    \"currency\": \"NGN\",\n    \"status\": \"success\",\n    \"gateway_response\": \"Approved\",\n    \"metadata\": {\n      \"receiver_account_number\": \"1234567890\",\n      \"receiver_bank\": \"Test Bank\"\n    },\n    \"authorization\": {\n      \"receiver_bank_account_number\": \"1234567890\",\n      \"receiver_bank\": \"Test Bank\",\n      \"sender_bank_account_number\": \"XXXXXX4553\",\n      \"channel\": \"dedicated_nuban\"\n    },\n    \"customer\": {\n      \"id\": 346344592,\n      \"first_name\": \"John\",\n      \"last_name\": \"Doe\",\n      \"email\": \"john@example.com\",\n      \"customer_code\": \"CUS_xxxxxxxxx\",\n      \"phone\": \"+2348100000000\"\n    },\n    \"fees\": 5000\n  }\n}",
+              "options": { "raw": { "language": "json" } }
             }
           }
         }

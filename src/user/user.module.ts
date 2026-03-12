@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { UserController } from './user.controller';
 import { UserService } from './user.service';
-import { AccountModule } from 'src/account/account.module';
+import { WalletModule } from 'src/wallet/wallet.module';
+import { PaystackModule } from 'src/paystack/paystack.module';
 
 @Module({
-    //AccountModule is imported so UserService can inject AccountService
-    //to create a bank account when a user sets their transaction PIN
-    imports: [AccountModule],
+    // WalletModule provides WalletService to create the wallet after PIN is set
+    // PaystackModule provides PaystackService to initiate DVA assignment
+    imports: [WalletModule, PaystackModule],
     controllers: [UserController],
     providers: [UserService],
 })

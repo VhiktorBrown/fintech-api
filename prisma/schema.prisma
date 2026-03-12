@@ -10,18 +10,26 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum AccountType {
-  SAVINGS
-  CURRENT
-}
 enum TransactionStatus {
   PENDING
   FAILED
   SUCCESS
 }
+
 enum TransactionType {
   CREDIT
   DEBIT
+}
+
+enum TransactionSource {
+  INTERNAL
+  PAYSTACK
+}
+
+enum VirtualAccountStatus {
+  PENDING
+  ACTIVE
+  FAILED
 }
 
 model User {
@@ -53,59 +61,76 @@ model User {
   // null means the user is logged out
   refreshToken String?
 
-  accounts Account[]
+  wallet         Wallet?
+  virtualAccount VirtualAccount?
 
   @@map("users")
 }
 
-model Account {
-  id Int @id @default(autoincrement())
-
-  accountNumber String @unique
-
-  // Decimal instead of Float to avoid floating-point rounding errors
-  // that can silently corrupt financial calculations (e.g. 0.1 + 0.2 != 0.3)
-  balance Decimal @default(0.0) @db.Decimal(18, 2)
-  canDebit Boolean @default(true)
-  canCredit Boolean @default(true)
+model Wallet {
+  id       Int     @id @default(autoincrement())
+  balance  Decimal @default(0.0) @db.Decimal(18, 2)
+  currency String  @default("NGN")
   isActive Boolean @default(true)
 
-  accountType AccountType
   dailyTransactionLimit Decimal? @db.Decimal(18, 2)
-  lastTransactionDate DateTime?
 
-  userId Int
-  user User @relation(fields: [userId], references: [id])
+  // tracks the async state of the Paystack DVA assignment
+  virtualAccountStatus VirtualAccountStatus @default(PENDING)
+
+  userId Int  @unique
+  user   User @relation(fields: [userId], references: [id])
+
+  transactions             Transaction[] @relation("WalletTransactions")
+  counterpartyTransactions Transaction[] @relation("CounterpartyWallet")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  transactions Transaction[] @relation(name: "PrimaryAccount")
-  counterpartyTransactions Transaction[] @relation(name: "CounterpartyAccount")
+  @@map("wallets")
+}
 
-  @@map("accounts")
+model VirtualAccount {
+  id Int @id @default(autoincrement())
+
+  paystackCustomerCode String
+  accountNumber        String @unique
+  accountName          String
+  bankName             String
+  bankCode             String
+
+  userId Int  @unique
+  user   User @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("virtual_accounts")
 }
 
 model Transaction {
-  id Int @id @default(autoincrement())
+  id     Int               @id @default(autoincrement())
+  type   TransactionType
+  source TransactionSource @default(INTERNAL)
 
-  type TransactionType
-  // Decimal for the same reason as Account.balance
+  // Decimal for the same reason as Wallet.balance
   amount Decimal @db.Decimal(18, 2)
-  reference String
-  status TransactionStatus
+
+  reference   String
+  status      TransactionStatus
   description String?
 
-  // @map keeps the existing DB column name ("balancebefore") while exposing
-  // the correctly-cased "balanceBefore" field in TypeScript — no migration needed
-  balanceBefore Decimal @db.Decimal(18, 2) @map("balancebefore")
-  balanceAfter  Decimal @db.Decimal(18, 2)
+  balanceBefore Decimal @db.Decimal(18, 2) @map("balance_before")
+  balanceAfter  Decimal @db.Decimal(18, 2) @map("balance_after")
 
-  accountId Int?
-  account Account? @relation(fields: [accountId], references: [id], name: "PrimaryAccount")
+  // unique constraint prevents double-crediting on Paystack webhook retries
+  paystackReference String? @unique @map("paystack_reference")
 
-  counterpartyAccountId Int?
-  counterpartyAccount Account? @relation(fields: [counterpartyAccountId], references: [id], name: "CounterpartyAccount")
+  walletId Int?
+  wallet   Wallet? @relation(fields: [walletId], references: [id], name: "WalletTransactions")
+
+  counterpartyWalletId Int?
+  counterpartyWallet   Wallet? @relation(fields: [counterpartyWalletId], references: [id], name: "CounterpartyWallet")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

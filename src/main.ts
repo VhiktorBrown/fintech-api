@@ -5,7 +5,9 @@ import { HttpExceptionFilter } from './shared/filters/http-exception.filter';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: true makes req.rawBody available as a Buffer — required for
+  // Paystack webhook signature verification (HMAC-SHA512 over the raw request body)
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   // Strips any properties not declared in DTOs and runs all validators
   app.useGlobalPipes(new ValidationPipe({

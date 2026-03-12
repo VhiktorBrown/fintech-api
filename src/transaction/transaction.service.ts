@@ -1,383 +1,250 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
+import { TransactionSource, TransactionStatus, TransactionType } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { AdminFundDto } from './dto/admin-fund.dto';
 import { SendMoneyDto } from './dto/send-money.dto';
-import { TransactionStatus, TransactionType } from '@prisma/client';
 import { generateTransactionReference } from 'src/shared/functions';
 import { AppResponse } from 'src/shared/app-response';
 import * as argon from 'argon2';
 
 @Injectable()
 export class TransactionService {
-    constructor(
-        private prisma: PrismaService,
-    ){}
+    constructor(private prisma: PrismaService) {}
 
-    async fundUserAccountByAdmin(
-        userId: number,
-        dto: AdminFundDto
-    ) {
+    async sendMoney(userId: number, dto: SendMoneyDto) {
         return this.prisma.$transaction(async (tx) => {
-            //confirm that the requesting user is an admin
-            const user = await tx.user.findUnique({
-                where: {id: userId}
+            const user = await tx.user.findUnique({ where: { id: userId } });
+
+            // user.pin holds an argon2 hash, so we must use argon.verify
+            // to compare it against the raw pin value from the request
+            const pinMatches = await argon.verify(user.pin, dto.transactionPin.toString());
+            if (!pinMatches) {
+                AppResponse.error('Invalid transaction pin', HttpStatus.FORBIDDEN);
+            }
+
+            // fetch sender's wallet
+            const senderWallet = await tx.wallet.findUnique({
+                where: { userId },
+                include: { user: true },
             });
 
-            if(!user.isAdmin){
-                AppResponse.error('You cannot perform this operation', HttpStatus.FORBIDDEN);
-            }
-            /*
-                For testing purposes, there's only going to be one admin account.
-                So, that we will use that for funding user accounts.
-            */
-
-            //verify the transaction pin against the stored hash
-            const pinMatches = await argon.verify(
-                user.pin,
-                dto.transactionPin.toString()
-            );
-            if(!pinMatches){
-                AppResponse.error("Invalid transaction pin", HttpStatus.FORBIDDEN);
+            if (!senderWallet) {
+                AppResponse.error('Wallet not found', HttpStatus.NOT_FOUND);
             }
 
-            //fetch admin's account
-            const account = await tx.account.findFirst({
-                where: { userId: userId }
+            // fetch recipient via their Paystack virtual account number
+            const recipientVA = await tx.virtualAccount.findUnique({
+                where: { accountNumber: dto.accountNumber },
             });
 
-            //fetch recipient's account by account number
-            const recipientAccount = await tx.account.findUnique({
-                where: { accountNumber: dto.accountNumber}
+            if (!recipientVA) {
+                AppResponse.error('Recipient account not found', HttpStatus.NOT_FOUND);
+            }
+
+            const recipientWallet = await tx.wallet.findUnique({
+                where: { userId: recipientVA.userId },
+                include: { user: true },
             });
 
-            if(!recipientAccount){
-                AppResponse.error("Account does not exist", HttpStatus.NOT_FOUND);
+            if (!recipientWallet) {
+                AppResponse.error('Recipient wallet not found', HttpStatus.NOT_FOUND);
             }
 
-            //an admin should not be able to fund their own account through this endpoint
-            if(account.accountNumber === recipientAccount.accountNumber){
-                AppResponse.error("Sorry, you cannot fund yourself.", HttpStatus.FORBIDDEN);
+            if (!senderWallet.isActive) {
+                AppResponse.error('Your wallet is deactivated and cannot send money', HttpStatus.FORBIDDEN);
             }
 
-            //ensure the admin account has enough balance to cover the transfer
-            if(dto.amount > Number(account.balance)){
-                AppResponse.error('Insufficient account balance', HttpStatus.FORBIDDEN);
+            if (!recipientWallet.isActive) {
+                AppResponse.error('The recipient wallet is deactivated', HttpStatus.FORBIDDEN);
+            }
+
+            // prevent self-transfers
+            if (senderWallet.id === recipientWallet.id) {
+                AppResponse.error('You cannot send money to yourself', HttpStatus.FORBIDDEN);
+            }
+
+            if (dto.amount > Number(senderWallet.balance)) {
+                AppResponse.error('Insufficient wallet balance', HttpStatus.FORBIDDEN);
+            }
+
+            // enforce the daily transaction limit if one is set.
+            // we sum all debit transactions today to check whether this transfer
+            // would push the total past the configured limit
+            if (senderWallet.dailyTransactionLimit !== null) {
+                const startOfDay = new Date();
+                startOfDay.setHours(0, 0, 0, 0);
+
+                const todaysDebits = await tx.transaction.aggregate({
+                    where: {
+                        walletId: senderWallet.id,
+                        type: TransactionType.DEBIT,
+                        createdAt: { gte: startOfDay },
+                    },
+                    _sum: { amount: true },
+                });
+
+                const totalSpentToday = Number(todaysDebits._sum.amount ?? 0);
+                const dailyLimit = Number(senderWallet.dailyTransactionLimit);
+
+                if (totalSpentToday + dto.amount > dailyLimit) {
+                    AppResponse.error(
+                        `This transfer would exceed your daily limit of ₦${dailyLimit}`,
+                        HttpStatus.FORBIDDEN,
+                    );
+                }
             }
 
             const reference = generateTransactionReference();
+            const senderName = `${senderWallet.user.firstName} ${senderWallet.user.lastName}`;
+            const recipientName = `${recipientWallet.user.firstName} ${recipientWallet.user.lastName}`;
 
-            //record the debit leg of the transaction for the admin's account
-            const debitTransaction = await tx.transaction.create({
+            // record the debit leg for the sender
+            const debitTx = await tx.transaction.create({
                 data: {
                     type: TransactionType.DEBIT,
+                    source: TransactionSource.INTERNAL,
                     amount: dto.amount,
-                    reference: reference,
+                    reference,
                     status: TransactionStatus.PENDING,
-                    description: 'Admin funding',
-                    accountId: account.id,
-                    balanceBefore: Number(account.balance),
-                    balanceAfter: Number(account.balance) - dto.amount,
-                    counterpartyAccountId: recipientAccount.id,
-                }
+                    description: dto.description ?? `Transfer to ${recipientName}`,
+                    walletId: senderWallet.id,
+                    balanceBefore: Number(senderWallet.balance),
+                    balanceAfter: Number(senderWallet.balance) - dto.amount,
+                    counterpartyWalletId: recipientWallet.id,
+                },
             });
 
-            //record the credit leg of the transaction for the recipient's account
-            const creditTransaction = await tx.transaction.create({
+            // record the credit leg for the recipient
+            const creditTx = await tx.transaction.create({
                 data: {
                     type: TransactionType.CREDIT,
+                    source: TransactionSource.INTERNAL,
                     amount: dto.amount,
-                    reference: reference,
+                    reference,
                     status: TransactionStatus.PENDING,
-                    description: 'Admin funding',
-                    accountId: recipientAccount.id,
-                    balanceBefore: Number(recipientAccount.balance),
-                    balanceAfter: Number(recipientAccount.balance) + dto.amount,
-                    counterpartyAccountId: account.id,
-                }
+                    description: dto.description ?? `Transfer from ${senderName}`,
+                    walletId: recipientWallet.id,
+                    balanceBefore: Number(recipientWallet.balance),
+                    balanceAfter: Number(recipientWallet.balance) + dto.amount,
+                    counterpartyWalletId: senderWallet.id,
+                },
             });
 
-            //deduct from the admin's balance
-            await tx.account.update({
-                where: {id: account.id},
-                data: {
-                    balance: { decrement: dto.amount},
-                    lastTransactionDate: new Date(),
-                }
+            // deduct from sender's balance
+            await tx.wallet.update({
+                where: { id: senderWallet.id },
+                data: { balance: { decrement: dto.amount } },
             });
 
-            //credit the recipient's balance
-            await tx.account.update({
-                where: { id: recipientAccount.id },
-                data: {
-                    balance: {increment: dto.amount},
-                    lastTransactionDate: new Date(),
-                }
+            // credit the recipient's balance
+            await tx.wallet.update({
+                where: { id: recipientWallet.id },
+                data: { balance: { increment: dto.amount } },
             });
 
-            //mark both legs of the transaction as successful
+            // mark both legs as successful
             await tx.transaction.update({
-                where: { id: debitTransaction.id},
-                data: { status: TransactionStatus.SUCCESS }
+                where: { id: debitTx.id },
+                data: { status: TransactionStatus.SUCCESS },
             });
 
             await tx.transaction.update({
-                where: { id: creditTransaction.id},
-                data: { status: TransactionStatus.SUCCESS }
+                where: { id: creditTx.id },
+                data: { status: TransactionStatus.SUCCESS },
             });
 
-            return AppResponse.success("Admin funding successful");
+            return AppResponse.success('Transfer successful');
         });
     }
 
-    async sendMoney(
-        userId: number,
-        dto: SendMoneyDto){
-            return this.prisma.$transaction(async (tx) => {
+    // fetches paginated transactions for the authenticated user's wallet.
+    // since there is one wallet per user, no walletId param is needed
+    async getAllTransactions(userId: number, page: number = 1, limit: number = 10) {
+        const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
 
-                const user = await tx.user.findUnique({
-                    where: {id: userId}
-                });
-
-                //user.pin holds an argon2 hash, so we must use argon.verify
-                //to compare it against the raw pin value from the request.
-                //a direct string comparison would never match
-                const pinMatches = await argon.verify(
-                    user.pin,
-                    dto.transactionPin.toString()
-                );
-                if(!pinMatches){
-                    AppResponse.error("Invalid transaction pin", HttpStatus.FORBIDDEN);
-                }
-
-                //fetch the sender's account
-                const account = await tx.account.findFirst({
-                    where: { userId: userId },
-                    include: { user: true }
-                });
-
-                //fetch the recipient's account by account number
-                const recipientAccount = await tx.account.findUnique({
-                    where: { accountNumber: dto.accountNumber},
-                    include: { user: true }
-                });
-
-                if(!recipientAccount){
-                    AppResponse.error('Account details not found', HttpStatus.NOT_FOUND);
-                }
-
-                //reject transfers to or from deactivated accounts
-                if(!account.isActive){
-                    AppResponse.error('Your account is deactivated and cannot send money', HttpStatus.FORBIDDEN);
-                }
-
-                if(!recipientAccount.isActive){
-                    AppResponse.error('The recipient account is deactivated', HttpStatus.FORBIDDEN);
-                }
-
-                //a user should not be able to send money to their own account
-                if(account.accountNumber === recipientAccount.accountNumber){
-                    AppResponse.error("Sorry, you cannot send money to yourself", HttpStatus.FORBIDDEN);
-                }
-
-                //ensure the sender has enough balance to cover the transfer
-                if(dto.amount > Number(account.balance)){
-                    AppResponse.error('Insufficient account balance', HttpStatus.FORBIDDEN);
-                }
-
-                //enforce the daily transaction limit if one is set on the account.
-                //we sum all debit transactions made today to see if this transfer
-                //would push the total over the configured limit
-                if(account.dailyTransactionLimit !== null){
-                    const startOfDay = new Date();
-                    startOfDay.setHours(0, 0, 0, 0);
-
-                    const todaysDebits = await tx.transaction.aggregate({
-                        where: {
-                            accountId: account.id,
-                            type: TransactionType.DEBIT,
-                            createdAt: { gte: startOfDay },
-                        },
-                        _sum: { amount: true }
-                    });
-
-                    const totalSpentToday = Number(todaysDebits._sum.amount ?? 0);
-                    const dailyLimit = Number(account.dailyTransactionLimit);
-
-                    if(totalSpentToday + dto.amount > dailyLimit){
-                        AppResponse.error(
-                            `This transfer would exceed your daily limit of ${dailyLimit}`,
-                            HttpStatus.FORBIDDEN
-                        );
-                    }
-                }
-
-                const reference = generateTransactionReference();
-
-                //record the debit leg for the sender
-                const debitTransaction = await tx.transaction.create({
-                    data: {
-                        type: TransactionType.DEBIT,
-                        amount: dto.amount,
-                        reference: reference,
-                        status: TransactionStatus.PENDING,
-                        description: dto.description
-                        ?? `Transfer to ${recipientAccount.user.firstName} ${recipientAccount.accountNumber}`,
-                        accountId: account.id,
-                        balanceBefore: Number(account.balance),
-                        balanceAfter: Number(account.balance) - dto.amount,
-                        counterpartyAccountId: recipientAccount.id,
-                    }
-                });
-
-                //record the credit leg for the recipient
-                const creditTransaction = await tx.transaction.create({
-                    data: {
-                        type: TransactionType.CREDIT,
-                        amount: dto.amount,
-                        reference: reference,
-                        status: TransactionStatus.PENDING,
-                        description: dto.description ??
-                         `Transfer from ${account.user.firstName} ${account.accountNumber}`,
-                        accountId: recipientAccount.id,
-                        balanceBefore: Number(recipientAccount.balance),
-                        balanceAfter: Number(recipientAccount.balance) + dto.amount,
-                        counterpartyAccountId: account.id,
-                    }
-                });
-
-                //deduct from sender's balance
-                await tx.account.update({
-                    where: {id: account.id},
-                    data: {
-                        balance: { decrement: dto.amount},
-                        lastTransactionDate: new Date(),
-                    }
-                });
-
-                //credit the recipient's balance
-                await tx.account.update({
-                    where: { id: recipientAccount.id },
-                    data: {
-                        balance: {increment: dto.amount},
-                        lastTransactionDate: new Date(),
-                    }
-                });
-
-                //mark both legs of the transaction as successful
-                await tx.transaction.update({
-                    where: { id: debitTransaction.id},
-                    data: { status: TransactionStatus.SUCCESS }
-                });
-
-                await tx.transaction.update({
-                    where: { id: creditTransaction.id},
-                    data: { status: TransactionStatus.SUCCESS }
-                });
-
-                return AppResponse.success("Transfer successful");
-            })
+        if (!wallet) {
+            AppResponse.error('Wallet not found', HttpStatus.NOT_FOUND);
         }
 
-        //fetches paginated transactions for a specific account.
-        //page and limit default to 1 and 10 respectively if not provided
-        async getAllTransactions(
-            userId: number,
-            accountId: number,
-            page: number = 1,
-            limit: number = 10,
-        ) {
-            //verify the account exists and belongs to the requesting user
-            const account = await this.prisma.account.findUnique({
-                where: { id: accountId, userId: userId }
-            });
+        const skip = (page - 1) * limit;
 
-            if(!account){
-                AppResponse.error("Account does not exist", HttpStatus.NOT_FOUND);
-            }
-
-            const skip = (page - 1) * limit;
-
-            //fetch the page of transactions and the total count in parallel
-            const [transactions, total] = await Promise.all([
-                this.prisma.transaction.findMany({
-                    where: { accountId: account.id },
-                    select: {
-                        id: true,
-                        amount: true,
-                        reference: true,
-                        status: true,
-                        description: true,
-                        type: true,
-                        balanceBefore: true,
-                        balanceAfter: true,
-                        createdAt: true,
-                        counterpartyAccount: {
-                          select: {
-                            accountNumber: true,
-                            user: {
-                              select: {
-                                firstName: true,
-                                lastName: true
-                              }
-                            }
-                          }
-                        }
-                    },
-                    orderBy: { createdAt: 'desc' },
-                    skip,
-                    take: limit,
-                }),
-                this.prisma.transaction.count({
-                    where: { accountId: account.id }
-                }),
-            ]);
-
-            return AppResponse.success("Transactions retrieved successfully", {
-                transactions,
-                meta: {
-                    total,
-                    page,
-                    limit,
-                    totalPages: Math.ceil(total / limit),
-                }
-            });
-        }
-
-        //fetches a single transaction by ID, scoped to the requesting user's accounts
-        async getTransaction(userId: number, transactionId: number) {
-            const transaction = await this.prisma.transaction.findFirst({
-                where: {
-                    id: transactionId,
-                    account: { userId: userId }
-                },
+        const [transactions, total] = await Promise.all([
+            this.prisma.transaction.findMany({
+                where: { walletId: wallet.id },
                 select: {
                     id: true,
+                    type: true,
+                    source: true,
                     amount: true,
                     reference: true,
                     status: true,
                     description: true,
-                    type: true,
                     balanceBefore: true,
                     balanceAfter: true,
                     createdAt: true,
-                    counterpartyAccount: {
+                    counterpartyWallet: {
                         select: {
-                            accountNumber: true,
                             user: {
-                                select: {
-                                    firstName: true,
-                                    lastName: true,
-                                }
-                            }
-                        }
-                    }
-                }
-            });
+                                select: { firstName: true, lastName: true },
+                            },
+                        },
+                    },
+                },
+                orderBy: { createdAt: 'desc' },
+                skip,
+                take: limit,
+            }),
+            this.prisma.transaction.count({ where: { walletId: wallet.id } }),
+        ]);
 
-            if(!transaction){
-                AppResponse.error("Transaction not found", HttpStatus.NOT_FOUND);
-            }
+        return AppResponse.success('Transactions retrieved successfully', {
+            transactions,
+            meta: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
+            },
+        });
+    }
 
-            return AppResponse.success("Transaction found", { transaction });
+    // fetches a single transaction by ID, scoped to the requesting user's wallet
+    async getTransaction(userId: number, transactionId: number) {
+        const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
+
+        if (!wallet) {
+            AppResponse.error('Wallet not found', HttpStatus.NOT_FOUND);
         }
+
+        const transaction = await this.prisma.transaction.findFirst({
+            where: {
+                id: transactionId,
+                walletId: wallet.id,
+            },
+            select: {
+                id: true,
+                type: true,
+                source: true,
+                amount: true,
+                reference: true,
+                status: true,
+                description: true,
+                balanceBefore: true,
+                balanceAfter: true,
+                createdAt: true,
+                counterpartyWallet: {
+                    select: {
+                        user: {
+                            select: { firstName: true, lastName: true },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!transaction) {
+            AppResponse.error('Transaction not found', HttpStatus.NOT_FOUND);
+        }
+
+        return AppResponse.success('Transaction found', { transaction });
+    }
 }

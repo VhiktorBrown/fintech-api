@@ -119,7 +119,7 @@ export class AuthService {
         //issue a fresh access token only — the refresh token stays the same
         const newPayload = { sub: user.id, email: user.email };
         const accessToken = await this.jwt.signAsync(newPayload, {
-            expiresIn: '15m',
+            expiresIn: '1h',
             secret,
         });
 
@@ -143,7 +143,7 @@ export class AuthService {
         const secret = this.config.get('JWT_SECRET');
 
         const [accessToken, refreshToken] = await Promise.all([
-            this.jwt.signAsync(payload, { expiresIn: '15m', secret }),
+            this.jwt.signAsync(payload, { expiresIn: '1h', secret }),
             this.jwt.signAsync(payload, { expiresIn: '7d',  secret }),
         ]);
 

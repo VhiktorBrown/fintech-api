@@ -6,7 +6,9 @@ import { UserModule } from './user/user.module';
 import { TransactionModule } from './transaction/transaction.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ConfigModule } from '@nestjs/config';
-import { AccountModule } from './account/account.module';
+import { WalletModule } from './wallet/wallet.module';
+import { PaystackModule } from './paystack/paystack.module';
+import { WebhookModule } from './webhook/webhook.module';
 
 @Module({
   imports: [
@@ -24,7 +26,9 @@ import { AccountModule } from './account/account.module';
     }]),
 
     AuthModule,
-    AccountModule,
+    WalletModule,
+    PaystackModule,
+    WebhookModule,
     UserModule,
     TransactionModule,
     PrismaModule,
