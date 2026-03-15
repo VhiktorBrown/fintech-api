@@ -20,11 +20,11 @@ export class UserService {
 
     async setPersonalInfo(userId: number, dto: PersonalInfoDto) {
         // check to see if the phone number already exists - it is meant to be unique
-        const user = await this.prisma.user.findFirst({
+        const existingUser = await this.prisma.user.findFirst({
             where: { phoneNumber: dto.phoneNumber }
         });
-        if(user.id != userId){
-            AppResponse.error("Phone number already exists", HttpStatus.CONFLICT);
+        if(existingUser && existingUser.id !== userId){
+            return AppResponse.error("Phone number already exists", HttpStatus.CONFLICT);
         }
 
         try {

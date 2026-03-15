@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { TransactionSource, TransactionStatus, TransactionType } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { SendMoneyDto } from './dto/send-money.dto';
@@ -6,8 +6,21 @@ import { generateTransactionReference } from 'src/shared/functions';
 import { AppResponse } from 'src/shared/app-response';
 import * as argon from 'argon2';
 
+interface WalletRow {
+    id: number;
+    balance: number;
+    currency: string;
+    isActive: boolean;
+    dailyTransactionLimit: number | null;
+    userId: number;
+    firstName: string;
+    lastName: string;
+}
+
 @Injectable()
 export class TransactionService {
+    private readonly logger = new Logger(TransactionService.name);
+
     constructor(private prisma: PrismaService) {}
 
     async sendMoney(userId: number, dto: SendMoneyDto) {
@@ -21,11 +34,16 @@ export class TransactionService {
                 AppResponse.error('Invalid transaction pin', HttpStatus.FORBIDDEN);
             }
 
-            // fetch sender's wallet
-            const senderWallet = await tx.wallet.findUnique({
-                where: { userId },
-                include: { user: true },
-            });
+            // Lock the sender's wallet row for the duration of this transaction.
+            // FOR UPDATE means concurrent sendMoney calls will queue here instead of
+            // all reading the same stale balance and overdrafting the account.
+            const [senderWallet] = await tx.$queryRaw<WalletRow[]>`
+                SELECT w.*, u."firstName", u."lastName"
+                FROM wallets w
+                JOIN users u ON u.id = w."userId"
+                WHERE w."userId" = ${userId}
+                FOR UPDATE
+            `;
 
             if (!senderWallet) {
                 AppResponse.error('Wallet not found', HttpStatus.NOT_FOUND);
@@ -40,10 +58,13 @@ export class TransactionService {
                 AppResponse.error('Recipient account not found', HttpStatus.NOT_FOUND);
             }
 
-            const recipientWallet = await tx.wallet.findUnique({
-                where: { userId: recipientVA.userId },
-                include: { user: true },
-            });
+            const [recipientWallet] = await tx.$queryRaw<WalletRow[]>`
+                SELECT w.*, u."firstName", u."lastName"
+                FROM wallets w
+                JOIN users u ON u.id = w."userId"
+                WHERE w."userId" = ${recipientVA.userId}
+                FOR UPDATE
+            `;
 
             if (!recipientWallet) {
                 AppResponse.error('Recipient wallet not found', HttpStatus.NOT_FOUND);
@@ -94,8 +115,8 @@ export class TransactionService {
             }
 
             const reference = generateTransactionReference();
-            const senderName = `${senderWallet.user.firstName} ${senderWallet.user.lastName}`;
-            const recipientName = `${recipientWallet.user.firstName} ${recipientWallet.user.lastName}`;
+            const senderName = `${senderWallet.firstName} ${senderWallet.lastName}`;
+            const recipientName = `${recipientWallet.firstName} ${recipientWallet.lastName}`;
 
             // record the debit leg for the sender
             const debitTx = await tx.transaction.create({
@@ -153,6 +174,41 @@ export class TransactionService {
             });
 
             return AppResponse.success('Transfer successful');
+        });
+    }
+
+    async stressTestSendMoney(userId: number, dto: SendMoneyDto, count: number) {
+        this.logger.log(`[STRESS TEST] Starting ${count} concurrent transfers of ₦${dto.amount} → account ${dto.accountNumber}`);
+
+        const results = await Promise.allSettled(
+            Array.from({ length: count }, (_, i) =>
+                this.sendMoney(userId, dto).then((res) => {
+                    this.logger.log(`[STRESS TEST] Attempt ${i + 1} SUCCEEDED`);
+                    return res;
+                }).catch((err) => {
+                    this.logger.warn(`[STRESS TEST] Attempt ${i + 1} FAILED — ${err?.message ?? err}`);
+                    throw err;
+                })
+            )
+        );
+
+        const summary = results.map((r, i) => ({
+            attempt: i + 1,
+            status: r.status,
+            ...(r.status === 'fulfilled'
+                ? { result: r.value }
+                : { error: r.reason?.message ?? String(r.reason) }),
+        }));
+
+        const succeeded = summary.filter(s => s.status === 'fulfilled').length;
+        const failed = summary.filter(s => s.status === 'rejected').length;
+
+        this.logger.log(`[STRESS TEST] Done — ${succeeded} succeeded, ${failed} failed`);
+
+        return AppResponse.success(`Stress test complete: ${succeeded} succeeded, ${failed} failed`, {
+            succeeded,
+            failed,
+            attempts: summary,
         });
     }
 

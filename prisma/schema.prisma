@@ -32,6 +32,13 @@ enum VirtualAccountStatus {
   FAILED
 }
 
+enum InboxEventStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
 model User {
   id Int @id @default(autoincrement())
   createdAt DateTime @default(now())
@@ -136,4 +143,27 @@ model Transaction {
   updatedAt DateTime @updatedAt
 
   @@map("transactions")
+}
+
+model InboxEvent {
+  id           Int              @id @default(autoincrement())
+
+  // deduplication key — derived from eventType + a unique field in the payload.
+  // unique constraint means a second INSERT for the same event is a no-op
+  eventId      String           @unique
+
+  eventType    String
+  payload      Json
+  status       InboxEventStatus @default(PENDING)
+  attempts     Int              @default(0)
+  errorMessage String?
+  processedAt  DateTime?
+
+  // set after each failure — processor skips events where nextRetryAt > NOW()
+  nextRetryAt  DateTime?
+
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@map("inbox_events")
 }

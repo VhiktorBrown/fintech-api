@@ -9,12 +9,15 @@ import { ConfigModule } from '@nestjs/config';
 import { WalletModule } from './wallet/wallet.module';
 import { PaystackModule } from './paystack/paystack.module';
 import { WebhookModule } from './webhook/webhook.module';
+import { InboxModule } from './inbox/inbox.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    ScheduleModule.forRoot(),
 
     //rate limiter applied globally to every route.
     //these values allow 20 requests per minute per IP by default.
@@ -29,6 +32,7 @@ import { WebhookModule } from './webhook/webhook.module';
     WalletModule,
     PaystackModule,
     WebhookModule,
+    InboxModule,
     UserModule,
     TransactionModule,
     PrismaModule,

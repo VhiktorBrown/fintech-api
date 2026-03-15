@@ -1,4 +1,4 @@
-import { Body, Controller, Get, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, ParseIntPipe, Post, Query, UseGuards, DefaultValuePipe } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { GetUser } from 'src/auth/decorator';
 import { JwtGuard } from 'src/auth/guard';
@@ -19,6 +19,16 @@ export class TransactionController {
         @Body() dto: SendMoneyDto,
     ) {
         return this.transactionService.sendMoney(userId, dto);
+    }
+
+    @ApiOperation({ summary: '[DEV] Fire n concurrent send-money requests to test for race conditions' })
+    @Post('stress-test')
+    stressTest(
+        @GetUser('id') userId: number,
+        @Body() dto: SendMoneyDto,
+        @Query('count', new DefaultValuePipe(5), ParseIntPipe) count: number,
+    ) {
+        return this.transactionService.stressTestSendMoney(userId, dto, count);
     }
 
     // page and limit are optional query params — defaults to page=1, limit=10
